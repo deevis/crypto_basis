@@ -1,7 +1,9 @@
 import os
 import json
 import logging
+import subprocess
 from datetime import datetime
+from dotenv import load_dotenv
 from btc_service import BTCService
 from pathlib import Path
 import binascii
@@ -18,11 +20,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class OPReturnScanner:
-    def __init__(self, output_dir="bitcoin_large_op_returns/op_return_data", use_database=True):
+    def __init__(self, output_dir="bitcoin_large_op_returns/op_return_data", use_database=True, auto_sync_git=None):
+        # Load environment variables
+        load_dotenv()
+        
         self.btc_service = BTCService(test_connection=True)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
         self.use_database = use_database
+        
+        # Auto-sync git: check environment variable if not explicitly set
+        if auto_sync_git is None:
+            auto_sync_git = os.getenv('OP_RETURN_AUTO_SYNC_GIT', 'false').lower() in ('true', '1', 'yes')
+        self.auto_sync_git = auto_sync_git
+        
+        # Get GitHub token for authentication
+        self.github_token = os.getenv('GITHUB_TOKEN')
+        
+        # Determine submodule root (parent of op_return_data directory)
+        # If output_dir is bitcoin_large_op_returns/op_return_data, submodule_root is bitcoin_large_op_returns
+        if 'op_return_data' in str(self.output_dir):
+            self.submodule_root = self.output_dir.parent
+        else:
+            # If output_dir is just bitcoin_large_op_returns, use it directly
+            self.submodule_root = self.output_dir if 'bitcoin_large_op_returns' in str(self.output_dir) else None
         
         if self.use_database:
             # Initialize database tables
@@ -402,7 +423,7 @@ class OPReturnScanner:
         }
         
         # Save metadata JSON (always - contains hex data for analysis)
-        with open(block_dir / f"{base_name}_metadata.json", 'w') as f:
+        with open(block_dir / f"{base_name}_metadata.json", 'w', newline='\n') as f:
             json.dump(metadata, f, indent=2)
         
         # Check if this is a dangerous executable type
@@ -621,6 +642,16 @@ class OPReturnScanner:
         
         logger.info(f"\n💾 Data saved to: {self.output_dir.absolute()}")
         
+        # Regenerate timeline_data.json if any OP_RETURNs were found
+        if total_found > 0:
+            self.regenerate_timeline_data()
+        
+        # Auto-sync git if enabled (check even if no new OP_RETURNs found)
+        if self.auto_sync_git:
+            self.sync_git_changes()
+        else:
+            logger.debug("Git auto-sync is disabled (set OP_RETURN_AUTO_SYNC_GIT=true or use --auto-sync-git)")
+        
         return total_found
     
     def rescan_large_op_returns(self):
@@ -766,7 +797,7 @@ class OPReturnScanner:
                             metadata['file_type'] = new_file_ext
                             metadata['mime_type'] = new_mime_type
                             
-                            with open(metadata_file, 'w') as f:
+                            with open(metadata_file, 'w', newline='\n') as f:
                                 json.dump(metadata, f, indent=2)
                             
                             logger.info(f"   ✓ Updated metadata file")
@@ -805,6 +836,261 @@ class OPReturnScanner:
         logger.info(f"   Unchanged: {unchanged_count}")
         
         return updated_count
+    
+    def regenerate_timeline_data(self):
+        """Regenerate timeline_data.json from all scanned OP_RETURN data"""
+        try:
+            logger.info(f"\n📊 Regenerating timeline_data.json...")
+            
+            # Import generate_timeline_data functions
+            import sys
+            from pathlib import Path
+            
+            # Try to import the generate_timeline_data module
+            try:
+                # Check if generate_timeline_data.py exists in the same directory
+                script_dir = Path(__file__).parent
+                generate_script = script_dir / 'generate_timeline_data.py'
+                
+                if generate_script.exists():
+                    # Import the module dynamically
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location("generate_timeline_data", generate_script)
+                    generate_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(generate_module)
+                    
+                    # Call the scan function (pass the op_return_data directory)
+                    timeline_data = generate_module.scan_op_return_data(str(self.output_dir))
+                    
+                    if timeline_data:
+                        # Save to JSON file (in op_return_data directory)
+                        output_file = self.output_dir / 'timeline_data.json'
+                        import json
+                        with open(output_file, 'w', newline='\n') as f:
+                            json.dump(timeline_data, f, indent=2)
+                        
+                        logger.info(f"   ✓ Updated timeline_data.json ({len(timeline_data)} items)")
+                    else:
+                        logger.debug("   No timeline data to generate")
+                else:
+                    logger.debug(f"   generate_timeline_data.py not found at {generate_script}")
+            except Exception as e:
+                logger.warning(f"   ⚠️  Failed to regenerate timeline_data.json: {e}")
+                logger.debug(f"   You can manually run: python generate_timeline_data.py")
+        except Exception as e:
+            logger.debug(f"Error regenerating timeline data: {e}")
+    
+    def setup_git_authentication(self):
+        """Setup git authentication using GitHub token or SSH"""
+        if self.github_token:
+            # Use HTTPS with token - update remote URL if needed
+            try:
+                # Check current remote URL
+                result = subprocess.run(
+                    ['git', 'remote', 'get-url', 'origin'],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    cwd=str(self.submodule_root)
+                )
+                
+                current_url = result.stdout.strip()
+                
+                # If using SSH URL, convert to HTTPS
+                if current_url.startswith('git@github.com:'):
+                    # Convert git@github.com:user/repo.git to https://github.com/user/repo.git
+                    repo_path = current_url.replace('git@github.com:', '').replace('.git', '')
+                    https_url = f'https://github.com/{repo_path}.git'
+                    
+                    # Update remote URL
+                    subprocess.run(
+                        ['git', 'remote', 'set-url', 'origin', https_url],
+                        check=True,
+                        cwd=str(self.submodule_root)
+                    )
+                    logger.debug(f"   Updated remote URL to HTTPS")
+                
+                return True
+            except Exception as e:
+                logger.debug(f"Git authentication setup error: {e}")
+                return False
+        else:
+            # Fall back to SSH if no token provided
+            logger.debug("No GITHUB_TOKEN found, using SSH authentication")
+            return True
+    
+    def sync_git_changes(self):
+        """Automatically commit and push changes to the bitcoin_large_op_returns submodule"""
+        if not self.submodule_root or not self.submodule_root.exists():
+            logger.debug("Submodule root not found, skipping git sync")
+            return
+        
+        git_dir = self.submodule_root / '.git'
+        if not git_dir.exists():
+            logger.debug(f"Not a git repository: {self.submodule_root}")
+            return
+        
+        # Setup git authentication (HTTPS with token or SSH)
+        self.setup_git_authentication()
+        
+        # Log that we're checking for sync
+        logger.info(f"\n🔄 Checking for git changes in {self.submodule_root.name}...")
+        
+        try:
+            # Change to submodule directory
+            original_cwd = os.getcwd()
+            os.chdir(str(self.submodule_root))
+            
+            try:
+                # Check if there are any changes
+                result = subprocess.run(
+                    ['git', 'status', '--porcelain'],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                
+                if not result.stdout.strip():
+                    logger.info(f"   ✓ No changes to commit - repository is up to date")
+                    return
+                
+                # Show what will be committed
+                logger.info(f"   Changes detected:")
+                for line in result.stdout.strip().split('\n')[:10]:  # Show first 10 files
+                    logger.info(f"     {line}")
+                if result.stdout.count('\n') > 10:
+                    logger.info(f"     ... and {result.stdout.count('\n') - 10} more files")
+                
+                # Add all changes
+                subprocess.run(
+                    ['git', 'add', '-A'],
+                    check=True,
+                    capture_output=True
+                )
+                
+                # Get count of new/changed files for commit message
+                status_lines = result.stdout.strip().split('\n')
+                new_files = sum(1 for line in status_lines if line.startswith('??'))
+                modified_files = len(status_lines) - new_files
+                
+                # Create commit message
+                commit_msg = f"Add OP_RETURN data: {new_files} new files"
+                if modified_files > 0:
+                    commit_msg += f", {modified_files} modified"
+                
+                # Commit
+                subprocess.run(
+                    ['git', 'commit', '-m', commit_msg],
+                    check=True,
+                    capture_output=True
+                )
+                logger.info(f"   ✓ Committed changes")
+                
+                # Push to remote (use token if available)
+                push_env = os.environ.copy()
+                
+                if self.github_token:
+                    # Use HTTPS with token - embed token in URL for this push
+                    result = subprocess.run(
+                        ['git', 'remote', 'get-url', 'origin'],
+                        capture_output=True,
+                        text=True,
+                        check=True
+                    )
+                    remote_url = result.stdout.strip()
+                    
+                    # Extract repo path from URL
+                    if 'github.com' in remote_url:
+                        if remote_url.startswith('https://'):
+                            # Already HTTPS, add token
+                            if '@' not in remote_url:  # No token already embedded
+                                repo_path = remote_url.replace('https://github.com/', '').replace('.git', '')
+                                token_url = f'https://{self.github_token}@github.com/{repo_path}.git'
+                            else:
+                                token_url = remote_url
+                        else:
+                            # SSH URL, convert to HTTPS with token
+                            repo_path = remote_url.replace('git@github.com:', '').replace('.git', '')
+                            token_url = f'https://{self.github_token}@github.com/{repo_path}.git'
+                        
+                        # Temporarily update remote URL with token, then push
+                        subprocess.run(
+                            ['git', 'remote', 'set-url', 'origin', token_url],
+                            check=True
+                        )
+                        push_result = subprocess.run(
+                            ['git', 'push'],
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                            env=push_env
+                        )
+                        # Restore original URL (without token) for security
+                        clean_url = remote_url.replace(f'{self.github_token}@', '') if '@' in remote_url else remote_url
+                        if not clean_url.startswith('https://'):
+                            clean_url = f'https://github.com/{repo_path}.git'
+                        subprocess.run(
+                            ['git', 'remote', 'set-url', 'origin', clean_url],
+                            check=False
+                        )
+                        
+                        # Check if token might be invalid
+                        if push_result.returncode != 0:
+                            error_output = push_result.stderr if push_result.stderr else push_result.stdout
+                            if '403' in error_output or 'Permission denied' in error_output or 'denied' in error_output.lower():
+                                logger.warning(f"   ⚠️  Authentication failed - check your GITHUB_TOKEN:")
+                                logger.warning(f"      - Token must have 'repo' scope")
+                                logger.warning(f"      - Token must be valid and not expired")
+                                logger.warning(f"      - Set GITHUB_TOKEN in .env file")
+                    else:
+                        # Not GitHub, use regular push
+                        push_result = subprocess.run(
+                            ['git', 'push'],
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                            env=push_env
+                        )
+                else:
+                    # No token, try SSH
+                    ssh_key = os.getenv('SSH_KEY_PATH', os.path.expanduser('~/.ssh/cyber64'))
+                    if os.path.exists(ssh_key):
+                        push_env['GIT_SSH_COMMAND'] = f'ssh -i {ssh_key} -o IdentitiesOnly=yes'
+                    
+                    push_result = subprocess.run(
+                        ['git', 'push'],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=push_env
+                    )
+                
+                if push_result.returncode == 0:
+                    logger.info(f"   ✓ Pushed to remote")
+                    logger.info(f"   ✅ Git sync complete!")
+                else:
+                    error_msg = push_result.stderr if push_result.stderr else push_result.stdout
+                    logger.warning(f"   ⚠️  Git push failed: {error_msg}")
+                    if not self.github_token:
+                        logger.warning(f"   Set GITHUB_TOKEN in .env file for automatic authentication")
+                        logger.warning(f"   Or manually run: eval $(ssh-agent) && ssh-add ~/.ssh/cyber64")
+                    elif '403' in error_msg or 'Permission denied' in error_msg or 'denied' in error_msg.lower():
+                        logger.warning(f"   Authentication issue detected:")
+                        logger.warning(f"   - Verify GITHUB_TOKEN has 'repo' scope")
+                        logger.warning(f"   - Check token hasn't expired")
+                        logger.warning(f"   - Ensure token has access to bitcoin_large_op_returns repository")
+                    logger.warning(f"   Manual push: cd {self.submodule_root} && git push")
+                
+            finally:
+                os.chdir(original_cwd)
+                
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr.decode() if e.stderr else str(e)
+            logger.warning(f"   ⚠️  Git sync failed: {error_msg}")
+            logger.warning(f"   You may need to manually commit and push changes")
+        except Exception as e:
+            logger.warning(f"   ⚠️  Error during git sync: {e}")
+            logger.warning(f"   You may need to manually commit and push changes")
 
 def main():
     """Main entry point"""
@@ -836,6 +1122,9 @@ Examples:
   
   Re-scan all blocks with large OP_RETURNs (to add fee tracking, etc.):
     python op_return_scanner.py --rescan_large_op_returns
+  
+  Regenerate timeline_data.json from existing data:
+    python op_return_scanner.py --regenerate-timeline-data-json
         """
     )
     parser.add_argument('start_block', type=int, nargs='?', help='Starting block number')
@@ -853,11 +1142,18 @@ Examples:
                        help='Re-scan all blocks that have large OP_RETURNs (to update with new features like fee tracking)')
     parser.add_argument('--no-db', action='store_true', 
                        help='Disable database storage (files only)')
+    parser.add_argument('--auto-sync-git', action='store_true',
+                       help='Automatically commit and push changes to git submodule (can also set OP_RETURN_AUTO_SYNC_GIT=true)')
+    parser.add_argument('--no-auto-sync-git', action='store_true',
+                       help='Disable automatic git sync (overrides environment variable)')
+    parser.add_argument('--regenerate-timeline-data-json', action='store_true',
+                       help='Regenerate timeline_data.json from existing OP_RETURN data and exit')
     
     args = parser.parse_args()
     
     try:
-        scanner = OPReturnScanner(output_dir=args.output, use_database=not args.no_db)
+        auto_sync = args.auto_sync_git if args.auto_sync_git else (False if args.no_auto_sync_git else None)
+        scanner = OPReturnScanner(output_dir=args.output, use_database=not args.no_db, auto_sync_git=auto_sync)
         
         # Show stats and exit
         if args.stats:
@@ -889,6 +1185,11 @@ Examples:
                 scanner.rescan_large_op_returns()
             else:
                 logger.error("Re-scanning requires database mode (don't use --no-db)")
+            return 0
+        
+        # Regenerate timeline_data.json and exit
+        if args.regenerate_timeline_data_json:
+            scanner.regenerate_timeline_data()
             return 0
         
         # Require start_block unless using --continue or --backwards

@@ -177,7 +177,7 @@ def main():
     if timeline_data:
         # Save to JSON file inside bitcoin_large_op_returns/op_return_data directory
         output_file = Path('bitcoin_large_op_returns/op_return_data') / 'timeline_data.json'
-        with open(output_file, 'w') as f:
+        with open(output_file, 'w', newline='\n') as f:
             json.dump(timeline_data, f, indent=2)
         
         print(f"\n[SUCCESS] Successfully generated {output_file}")

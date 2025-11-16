@@ -142,7 +142,7 @@ class PriceService:
         # convert current_time to YYYY-MM-DD HH:MM:SS
         time_string = datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')
         data = { "time": time_string, "source": self.source, "prices": prices }
-        with open('data/current_prices.json', 'w') as f:
+        with open('data/current_prices.json', 'w', newline='\n') as f:
             json.dump(data, f)
     
     
