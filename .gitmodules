@@ -1,0 +1,3 @@
+[submodule "bitcoin_large_op_returns"]
+	path = bitcoin_large_op_returns
+	url = git@github.com:deevis/bitcoin_large_op_returns.git

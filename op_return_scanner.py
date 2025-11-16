@@ -18,7 +18,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class OPReturnScanner:
-    def __init__(self, output_dir="op_return_data", use_database=True):
+    def __init__(self, output_dir="bitcoin_large_op_returns/op_return_data", use_database=True):
         self.btc_service = BTCService(test_connection=True)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
@@ -840,7 +840,7 @@ Examples:
     )
     parser.add_argument('start_block', type=int, nargs='?', help='Starting block number')
     parser.add_argument('end_block', type=int, nargs='?', help='Ending block number (optional, defaults to current height)')
-    parser.add_argument('--output', '-o', default='op_return_data', help='Output directory (default: op_return_data)')
+    parser.add_argument('--output', '-o', default='bitcoin_large_op_returns/op_return_data', help='Output directory (default: bitcoin_large_op_returns/op_return_data)')
     parser.add_argument('--continue', '-c', dest='auto_continue', action='store_true', 
                        help='Continue forward from last scanned block')
     parser.add_argument('--backwards', '-b', action='store_true',

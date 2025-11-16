@@ -1046,7 +1046,7 @@ def generate_timeline(output_file='op_return_timeline.html'):
     
     # Build data array
     timeline_data = []
-    output_dir = Path('op_return_data')
+    output_dir = Path('bitcoin_large_op_returns/op_return_data')
     
     for idx, (block_num, block_time, mined_by, txid, vout_idx, size, ftype, mime, is_text, decoded, fee, fee_rate) in enumerate(results, 1):
         print(f"[INFO] Processing {idx}/{len(results)}: Block {block_num} ({ftype})...", end='\r')

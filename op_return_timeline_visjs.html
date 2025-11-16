@@ -449,7 +449,7 @@
         // Load and initialize timeline
         async function loadTimelineData() {
             try {
-                const response = await fetch('op_return_data/timeline_data.json');
+                const response = await fetch('bitcoin_large_op_returns/op_return_data/timeline_data.json');
                 if (!response.ok) {
                     throw new Error('Failed to load timeline data');
                 }
@@ -461,7 +461,7 @@
             } catch (error) {
                 console.error('Error loading timeline data:', error);
                 document.getElementById('statsBar').innerHTML = 
-                    '<div style="color: #ff0000;">❌ Error loading data. Make sure op_return_data/timeline_data.json exists. Run: python generate_timeline_data.py</div>';
+                    '<div style="color: #ff0000;">❌ Error loading data. Make sure bitcoin_large_op_returns/op_return_data/timeline_data.json exists. Run: python generate_timeline_data.py</div>';
             }
         }
         
@@ -766,7 +766,7 @@
             // Preview
             if (item.hasDecoded && item.type === 'text') {
                 // Load full text content
-                const textPath = `op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}_decoded.txt`;
+                const textPath = `bitcoin_large_op_returns/op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}_decoded.txt`;
                 fetch(textPath)
                     .then(response => response.text())
                     .then(fullText => {
@@ -782,7 +782,7 @@
                         `;
                     });
             } else if (item.hasFile && ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(item.type)) {
-                const imgPath = `op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}.${item.type}`;
+                const imgPath = `bitcoin_large_op_returns/op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}.${item.type}`;
                 preview.innerHTML = `
                     <h3 style="margin-bottom: 15px; color: #ff00ff;">Image Preview:</h3>
                     <div class="preview-image">
@@ -790,7 +790,7 @@
                     </div>
                 `;
             } else if (item.hasFile && ['mp4', 'webm', 'avi', 'mov'].includes(item.type)) {
-                const videoPath = `op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}.${item.type}`;
+                const videoPath = `bitcoin_large_op_returns/op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}.${item.type}`;
                 preview.innerHTML = `
                     <h3 style="margin-bottom: 15px; color: #ffff00;">Video Preview:</h3>
                     <div class="preview-image" style="text-align: center;">
@@ -801,7 +801,7 @@
                     </div>
                 `;
             } else if (item.hasFile && ['mp3', 'ogg', 'wav', 'flac'].includes(item.type)) {
-                const audioPath = `op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}.${item.type}`;
+                const audioPath = `bitcoin_large_op_returns/op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}.${item.type}`;
                 preview.innerHTML = `
                     <h3 style="margin-bottom: 15px; color: #00ff00;">Audio Preview:</h3>
                     <div style="text-align: center; padding: 30px;">

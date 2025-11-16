@@ -1,8 +1,8 @@
-# Update Timeline - Regenerate timeline data from op_return_data directory
+# Update Timeline - Regenerate timeline data from bitcoin_large_op_returns/op_return_data directory
 # Run this after scanning new blocks to update the visualization
 
 Write-Host "`n=== Bitcoin OP_RETURN Timeline Updater ===" -ForegroundColor Cyan
-Write-Host "Regenerating timeline data from op_return_data directory...`n" -ForegroundColor Gray
+Write-Host "Regenerating timeline data from bitcoin_large_op_returns/op_return_data directory...`n" -ForegroundColor Gray
 
 # Activate virtual environment
 .\env\Scripts\Activate.ps1

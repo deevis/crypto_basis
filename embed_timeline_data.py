@@ -9,8 +9,8 @@ import json
 def create_standalone_timeline():
     """Create a single-file HTML with embedded JSON data"""
     
-    # Read the timeline data from op_return_data directory
-    with open('op_return_data/timeline_data.json', 'r') as f:
+    # Read the timeline data from bitcoin_large_op_returns/op_return_data directory
+    with open('bitcoin_large_op_returns/op_return_data/timeline_data.json', 'r') as f:
         timeline_data = json.load(f)
     
     # Read the HTML template
@@ -20,7 +20,7 @@ def create_standalone_timeline():
     # Replace the fetch() call with embedded data
     fetch_code = """async function loadTimelineData() {
             try {
-                const response = await fetch('op_return_data/timeline_data.json');
+                const response = await fetch('bitcoin_large_op_returns/op_return_data/timeline_data.json');
                 if (!response.ok) {
                     throw new Error('Failed to load timeline data');
                 }

@@ -30,7 +30,7 @@ This is a modern, interactive timeline visualization of large OP_RETURN data fou
 
 - **`op_return_timeline_visjs.html`** - Main timeline visualization (Vis.js powered)
 - **`generate_timeline_data.py`** - Python script to scan and generate data
-- **`op_return_data/timeline_data.json`** - Generated data file (253 items currently)
+- **`bitcoin_large_op_returns/op_return_data/timeline_data.json`** - Generated data file (253 items currently)
 - **`op_return_timeline.html`** - Original custom timeline (minimap version)
 
 ## Usage
@@ -45,9 +45,9 @@ python generate_timeline_data.py
 ```
 
 This will:
-- Scan all directories in `op_return_data/`
+- Scan all directories in `bitcoin_large_op_returns/op_return_data/`
 - Read all `*_metadata.json` files
-- Generate `op_return_data/timeline_data.json` with all OP_RETURN data
+- Generate `bitcoin_large_op_returns/op_return_data/timeline_data.json` with all OP_RETURN data
 
 ### 2. View the Timeline
 
@@ -86,11 +86,11 @@ Bitcoin Blocks
     ↓
 op_return_scanner.py (scan blocks)
     ↓
-op_return_data/ (metadata JSON files)
+bitcoin_large_op_returns/op_return_data/ (metadata JSON files)
     ↓
 generate_timeline_data.py (aggregate data)
     ↓
-op_return_data/timeline_data.json (single data file)
+bitcoin_large_op_returns/op_return_data/timeline_data.json (single data file)
     ↓
 op_return_timeline_visjs.html (visualization)
 ```
@@ -170,18 +170,18 @@ Potential improvements:
 ## Troubleshooting
 
 **"Error loading data"**
-- Make sure `op_return_data/timeline_data.json` exists
+- Make sure `bitcoin_large_op_returns/op_return_data/timeline_data.json` exists
 - Run `python generate_timeline_data.py`
 
 **Images not showing**
-- Check file paths in `op_return_data/`
+- Check file paths in `bitcoin_large_op_returns/op_return_data/`
 - Ensure browser can access local files
 - Try using a local web server if needed
 
 **Empty timeline**
 - Check that filters aren't all disabled
 - Click "Show All" button
-- Verify data exists in `op_return_data/timeline_data.json`
+- Verify data exists in `bitcoin_large_op_returns/op_return_data/timeline_data.json`
 
 ---
 

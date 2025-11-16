@@ -55,8 +55,8 @@ def is_interesting_text(content, file_type):
     # Passed all filters - looks like interesting human text!
     return True
 
-def scan_op_return_data(data_dir='op_return_data'):
-    """Scan op_return_data directory and extract timeline data from metadata files"""
+def scan_op_return_data(data_dir='bitcoin_large_op_returns/op_return_data'):
+    """Scan bitcoin_large_op_returns/op_return_data directory and extract timeline data from metadata files"""
     
     timeline_data = []
     data_path = Path(data_dir)
@@ -170,13 +170,13 @@ def scan_op_return_data(data_dir='op_return_data'):
 
 def main():
     """Main function"""
-    print("Generating timeline data from op_return_data directory...\n")
+    print("Generating timeline data from bitcoin_large_op_returns/op_return_data directory...\n")
     
     timeline_data = scan_op_return_data()
     
     if timeline_data:
-        # Save to JSON file inside op_return_data directory
-        output_file = Path('op_return_data') / 'timeline_data.json'
+        # Save to JSON file inside bitcoin_large_op_returns/op_return_data directory
+        output_file = Path('bitcoin_large_op_returns/op_return_data') / 'timeline_data.json'
         with open(output_file, 'w') as f:
             json.dump(timeline_data, f, indent=2)
         
