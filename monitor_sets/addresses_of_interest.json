@@ -1,0 +1,38 @@
+[
+    {
+        "address": "32ixEdVJWo3kmvJGMTZq5jAQVZZeuwnqzo",
+        "owner": "El Salvador",
+        "details": "El Salvador's national BTC treasury address, disclosed by President Nayib Bukele.",
+        "origin_block": 700000
+    },
+    {
+        "address": "bc1qa5wkgaew2dkv56kfvj49j0av5nml45x9ek9hz6",
+        "owner": "United States Government",
+        "details": "Holds BTC seized from criminal cases such as Silk Road."
+    },
+   {
+        "address": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
+        "owner": "Bitwise / BlackRock / Fidelity / Franklin Templeton / Tesla / MIT / Kraken / Coinbase / Binance (shared)",
+        "details": "Common placeholder address often used in ETF or institutional examples (likely illustrative or over-attributed)."
+    },
+    {
+        "address": "1FzWLkAahHooV3kzTgyx6qsswXJ6sCXkSR",
+        "owner": "MicroStrategy",
+        "details": "Unofficially linked to MicroStrategy's large BTC holdings; over 214,000 BTC under Michael Saylor's leadership."
+    },
+    {
+        "address": "bc1q0unygz3ddt8x0v33s6ztxkrnw0s0tl7zk4yxwd",
+        "owner": "Germany BKA",
+        "details": "Used to manage Bitcoin seized by the German Federal Criminal Police Office (BKA)."
+    },
+    {
+        "address": "1P5ZEDWTKTFGxQjZphgWPQUpe554WKDfHQ",
+        "owner": "Hal Finney / Gavin Andresen",
+        "details": "Historically significant address used by early Bitcoin developer Hal Finney; sometimes referenced in relation to Gavin Andresen."
+    },
+    {
+        "address": "1Ay8vMC7R1UbyCCZRVULMV7iQpHSAbguJP",
+        "owner": "Mr. 100",
+        "details": "Known for consistent 100 BTC purchases, speculated to be Upbit or a large OTC entity."
+    }
+]

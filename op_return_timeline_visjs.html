@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitcoin OP_RETURN Timeline - Vis.js</title>
+    
+    <!-- Vis.js Timeline -->
+    <script type="text/javascript" src="https://unpkg.com/vis-timeline@latest/standalone/umd/vis-timeline-graph2d.min.js"></script>
+    <link href="https://unpkg.com/vis-timeline@latest/styles/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0e27;
+            color: #e0e0e0;
+        }
+        
+        .header {
+            padding: 20px;
+            background: linear-gradient(135deg, #1a1f3a 0%, #0a0e27 100%);
+            border-bottom: 2px solid #00ffff;
+            box-shadow: 0 4px 20px rgba(0, 255, 255, 0.3);
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            text-align: center;
+            background: linear-gradient(90deg, #00ffff, #ff00ff, #ffff00);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #888;
+            font-size: 0.9em;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: #1a1f3a;
+            border-bottom: 1px solid #333;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .filter-chips {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .chip {
+            padding: 6px 12px;
+            border-radius: 20px;
+            border: 2px solid;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.3s;
+            background: #1a1f3a;
+            opacity: 0.3;
+            filter: grayscale(80%);
+        }
+        
+        .chip.active {
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 15px;
+            opacity: 1;
+            font-weight: bold;
+            filter: grayscale(0%);
+        }
+        
+        .chip:hover {
+            transform: translateY(-2px);
+            opacity: 0.8;
+            filter: grayscale(40%);
+        }
+        
+        .chip-text { color: #00ffff; border-color: #00ffff; }
+        .chip-jpg, .chip-jpeg, .chip-png, .chip-gif, .chip-webp, .chip-bmp { 
+            color: #ff00ff; border-color: #ff00ff; 
+        }
+        .chip-mp4, .chip-avi, .chip-webm { 
+            color: #ffff00; border-color: #ffff00; 
+        }
+        .chip-mp3, .chip-flac, .chip-ogg { 
+            color: #00ff00; border-color: #00ff00; 
+        }
+        .chip-pdf, .chip-7z, .chip-zip { 
+            color: #ff8800; border-color: #ff8800; 
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #00ffff 0%, #0088ff 100%);
+            border: none;
+            color: #000;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.9em;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 255, 255, 0.5);
+        }
+        
+        .stats-bar {
+            padding: 10px 20px;
+            background: #0f1428;
+            border-bottom: 1px solid #333;
+            display: flex;
+            gap: 30px;
+            justify-content: center;
+            font-size: 0.9em;
+        }
+        
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .stat-value {
+            font-weight: bold;
+            color: #00ffff;
+        }
+        
+        .stat-label {
+            color: #888;
+        }
+        
+        #timeline {
+            height: calc(100vh - 250px);
+            margin: 20px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 2px solid #00ffff;
+            box-shadow: 0 4px 20px rgba(0, 255, 255, 0.2);
+        }
+        
+        /* Custom Vis.js styling for dark theme */
+        .vis-timeline {
+            background: #0a0e27;
+            border: none;
+        }
+        
+        .vis-item {
+            background: rgba(0, 255, 255, 0.1);
+            border-color: #00ffff;
+            color: #e0e0e0;
+            border-radius: 4px;
+            font-size: 11px;
+            box-shadow: 0 0 8px rgba(0, 255, 255, 0.3);
+        }
+        
+        .vis-item.vis-selected {
+            background: rgba(0, 255, 255, 0.3);
+            border-color: #ff00ff;
+            box-shadow: 0 0 15px rgba(255, 0, 255, 0.6);
+        }
+        
+        .vis-item.type-text {
+            background: rgba(0, 255, 255, 0.15);
+            border-color: #00ffff;
+        }
+        
+        .vis-item.type-jpg, .vis-item.type-jpeg, .vis-item.type-png, 
+        .vis-item.type-gif, .vis-item.type-webp, .vis-item.type-bmp {
+            background: rgba(255, 0, 255, 0.15);
+            border-color: #ff00ff;
+        }
+        
+        .vis-item.type-mp4, .vis-item.type-avi, .vis-item.type-webm {
+            background: rgba(255, 255, 0, 0.15);
+            border-color: #ffff00;
+        }
+        
+        .vis-item.type-mp3, .vis-item.type-flac, .vis-item.type-ogg {
+            background: rgba(0, 255, 0, 0.15);
+            border-color: #00ff00;
+        }
+        
+        .vis-item.type-pdf, .vis-item.type-7z, .vis-item.type-zip {
+            background: rgba(255, 136, 0, 0.15);
+            border-color: #ff8800;
+        }
+        
+        .vis-time-axis .vis-text {
+            color: #888;
+        }
+        
+        .vis-time-axis .vis-grid {
+            border-color: #333;
+        }
+        
+        .vis-time-axis .vis-grid.vis-odd {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        
+        .vis-labelset .vis-label {
+            background: #1a1f3a;
+            color: #e0e0e0;
+            border-color: #333;
+        }
+        
+        .vis-panel.vis-background.vis-horizontal {
+            background: #0a0e27;
+        }
+        
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            animation: fadeIn 0.3s;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-content {
+            background: #1a1f3a;
+            border-radius: 12px;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            border: 2px solid #00ffff;
+            box-shadow: 0 8px 40px rgba(0, 255, 255, 0.4);
+            position: relative;
+        }
+        
+        .modal-content.wide {
+            max-width: 1400px;
+            width: 90%;
+        }
+        
+        .modal-close {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 2em;
+            background: none;
+            border: none;
+            color: #00ffff;
+            cursor: pointer;
+            padding: 0;
+            width: 40px;
+            height: 40px;
+            line-height: 40px;
+            text-align: center;
+        }
+        
+        .modal-close:hover {
+            color: #ff00ff;
+            transform: scale(1.2);
+        }
+        
+        .modal-header {
+            padding: 30px 30px 20px 30px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .modal-title {
+            font-size: 1.5em;
+            color: #00ffff;
+            margin-bottom: 10px;
+        }
+        
+        .modal-meta {
+            padding: 20px 30px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            background: rgba(0, 0, 0, 0.3);
+        }
+        
+        .meta-item {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .meta-label {
+            font-size: 0.8em;
+            color: #888;
+            text-transform: uppercase;
+        }
+        
+        .meta-value {
+            font-weight: bold;
+            color: #e0e0e0;
+        }
+        
+        .modal-preview {
+            padding: 30px;
+        }
+        
+        .preview-text {
+            background: #0a0e27;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .preview-image {
+            text-align: center;
+        }
+        
+        .preview-image img {
+            max-width: 100%;
+            max-height: 500px;
+            border-radius: 8px;
+            border: 2px solid #333;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #888;
+        }
+        
+        .loading:after {
+            content: '...';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔗 Bitcoin OP_RETURN Timeline</h1>
+        <div class="subtitle">Interactive visualization of large OP_RETURN data on Bitcoin blockchain</div>
+    </div>
+    
+    <div class="controls">
+        <div class="filter-section">
+            <strong style="margin-right: 10px;">Filter by Type:</strong>
+            <div class="filter-chips" id="filterChips"></div>
+        </div>
+        <div class="button-group">
+            <button onclick="showAllTypes()">Show All</button>
+            <button onclick="clearAllTypes()">Clear All</button>
+            <button onclick="timeline.fit()">Fit All</button>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <div style="display: flex; gap: 30px; align-items: center; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <strong>Size Range (bytes):</strong>
+                <input type="number" id="minSize" placeholder="min bytes" 
+                       style="width: 120px; padding: 6px 12px; border-radius: 4px; background: #0f1428; color: #e0e0e0; border: 1px solid #00ffff;"
+                       onchange="applySizeFilter()">
+                <span style="color: #888;">to</span>
+                <input type="number" id="maxSize" placeholder="max bytes" 
+                       style="width: 120px; padding: 6px 12px; border-radius: 4px; background: #0f1428; color: #e0e0e0; border: 1px solid #00ffff;"
+                       onchange="applySizeFilter()">
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+                <strong>Search Text:</strong>
+                <input type="text" id="searchInput" placeholder="Search in text content..." 
+                       style="flex: 1; max-width: 400px; padding: 6px 12px; border-radius: 4px; background: #0f1428; color: #e0e0e0; border: 1px solid #00ffff;"
+                       onkeyup="applySearchFilter()">
+                <button onclick="clearSearch()" style="padding: 6px 12px;">Clear</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="stats-bar" id="statsBar">
+        <div class="loading">Loading timeline data</div>
+    </div>
+    
+    <div id="timeline"></div>
+    
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle"></div>
+            </div>
+            <div class="modal-meta" id="modalMeta"></div>
+            <div class="modal-preview" id="modalPreview"></div>
+        </div>
+    </div>
+    
+    <script>
+        let timeline;
+        let items;
+        let groups;
+        let allData = [];
+        let activeFilters = new Set();
+        let minSizeBytes = null;
+        let maxSizeBytes = null;
+        let searchText = '';
+        
+        // Color mapping for file types
+        const colorMap = {
+            'text': '#00ffff',
+            'jpg': '#ff00ff', 'jpeg': '#ff00ff', 'png': '#ff00ff', 
+            'gif': '#ff00ff', 'webp': '#ff00ff', 'bmp': '#ff00ff',
+            'mp4': '#ffff00', 'avi': '#ffff00', 'webm': '#ffff00',
+            'mp3': '#00ff00', 'flac': '#00ff00', 'ogg': '#00ff00',
+            'pdf': '#ff8800', '7z': '#ff8800', 'zip': '#ff8800'
+        };
+        
+        // Load and initialize timeline
+        async function loadTimelineData() {
+            try {
+                const response = await fetch('op_return_data/timeline_data.json');
+                if (!response.ok) {
+                    throw new Error('Failed to load timeline data');
+                }
+                
+                allData = await response.json();
+                console.log(`Loaded ${allData.length} OP_RETURN items`);
+                
+                initializeTimeline();
+            } catch (error) {
+                console.error('Error loading timeline data:', error);
+                document.getElementById('statsBar').innerHTML = 
+                    '<div style="color: #ff0000;">❌ Error loading data. Make sure op_return_data/timeline_data.json exists. Run: python generate_timeline_data.py</div>';
+            }
+        }
+        
+        function initializeTimeline() {
+            // Create groups for file types
+            const types = [...new Set(allData.map(d => d.type))].sort();
+            groups = new vis.DataSet(
+                types.map(type => ({
+                    id: type,
+                    content: getTypeLabel(type),
+                    style: `background-color: ${colorMap[type] || '#666'}; border-color: ${colorMap[type] || '#666'};`
+                }))
+            );
+            
+            // Create filter chips
+            setupFilters(types);
+            
+            // Initially show only media types (not text)
+            const mediaTypes = types.filter(t => 
+                ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'mp4', 'webm', 'avi', 'mov', 'mp3', 'ogg', 'wav', 'flac'].includes(t)
+            );
+            activeFilters = new Set(mediaTypes);
+            updateFilterChips();
+            
+            // Create items dataset
+            items = new vis.DataSet();
+            updateItems();
+            
+            // Timeline container
+            const container = document.getElementById('timeline');
+            
+            // Timeline options
+            const options = {
+                groupOrder: 'content',
+                editable: false,
+                orientation: 'top',
+                zoomMin: 1000 * 60 * 60 * 12,        // 12 hours minimum
+                zoomMax: 1000 * 60 * 60 * 24 * 365,  // 1 year maximum
+                showCurrentTime: false,
+                stack: false,  // Disable stacking - spread items horizontally
+                stackSubgroups: false,
+                margin: {
+                    item: {
+                        horizontal: 50,  // MUCH wider horizontal spacing (was 50)
+                        vertical: 25
+                    }
+                },
+                tooltip: {
+                    followMouse: true,
+                    overflowMethod: 'cap'
+                },
+                template: function(item, element, data) {
+                    const sizeKB = (item.size / 1024).toFixed(1);
+                    return `<div style="padding: 4px 8px; min-width: 80px; text-align: center;">
+                        <strong>${item.block}</strong><br>
+                        ${sizeKB}KB<br>
+                        <span style="font-size: 0.85em; text-transform: uppercase;">${item.fileType}</span>
+                    </div>`;
+                },
+                // Spread items out more
+                maxHeight: 800,
+                verticalScroll: true,
+                width: '100%',
+                min: new Date(2024, 4, 1),  // Start earlier to spread timeline
+                max: new Date(2026, 0, 1)   // End later to spread timeline
+            };
+            
+            // Create timeline
+            timeline = new vis.Timeline(container, items, groups, options);
+            
+            // Handle selection
+            timeline.on('select', function(properties) {
+                if (properties.items.length > 0) {
+                    const itemId = properties.items[0];
+                    const item = allData.find(d => d.id === itemId);
+                    if (item) {
+                        openModal(item);
+                    }
+                }
+            });
+            
+            // Update stats
+            updateStats();
+        }
+        
+        function getTypeLabel(type) {
+            const labels = {
+                'text': '📝 Text',
+                'jpg': '🖼️ JPG', 'jpeg': '🖼️ JPEG', 'png': '🖼️ PNG',
+                'gif': '🖼️ GIF', 'webp': '🖼️ WebP', 'bmp': '🖼️ BMP',
+                'mp4': '🎥 MP4', 'avi': '🎥 AVI', 'webm': '🎥 WebM',
+                'mp3': '🎵 MP3', 'flac': '🎵 FLAC', 'ogg': '🎵 OGG',
+                'pdf': '📄 PDF', '7z': '📦 7z', 'zip': '📦 ZIP'
+            };
+            return labels[type] || type.toUpperCase();
+        }
+        
+        function setupFilters(types) {
+            const filterChips = document.getElementById('filterChips');
+            filterChips.innerHTML = '';
+            
+            types.forEach(type => {
+                const chip = document.createElement('span');
+                chip.className = `chip chip-${type} active`;
+                chip.textContent = getTypeLabel(type);
+                chip.onclick = () => toggleFilter(type, chip);
+                filterChips.appendChild(chip);
+            });
+        }
+        
+        function toggleFilter(type, chipEl) {
+            if (activeFilters.has(type)) {
+                activeFilters.delete(type);
+                chipEl.classList.remove('active');
+            } else {
+                activeFilters.add(type);
+                chipEl.classList.add('active');
+            }
+            updateItems();
+            updateStats();
+        }
+        
+        function showAllTypes() {
+            const types = [...new Set(allData.map(d => d.type))];
+            activeFilters = new Set(types);
+            updateFilterChips();
+            updateItems();
+            updateStats();
+        }
+        
+        function clearAllTypes() {
+            activeFilters.clear();
+            updateFilterChips();
+            updateItems();
+            updateStats();
+        }
+        
+        function updateFilterChips() {
+            document.querySelectorAll('.chip').forEach(chip => {
+                const type = chip.textContent.split(' ')[1]?.toLowerCase() || 
+                            chip.textContent.toLowerCase();
+                const allTypes = [...new Set(allData.map(d => d.type))];
+                const matchingType = allTypes.find(t => chip.classList.contains(`chip-${t}`));
+                
+                if (matchingType && activeFilters.has(matchingType)) {
+                    chip.classList.add('active');
+                } else {
+                    chip.classList.remove('active');
+                }
+            });
+        }
+        
+        function updateItems() {
+            // Filter data by type, size, and search text
+            const filteredData = allData.filter(d => {
+                // Type filter
+                if (!activeFilters.has(d.type)) return false;
+                
+                // Size filter (bytes)
+                if (minSizeBytes !== null && d.size < minSizeBytes) return false;
+                if (maxSizeBytes !== null && d.size > maxSizeBytes) return false;
+                
+                // Search text filter (only for text items)
+                if (searchText && d.type === 'text') {
+                    if (!d.preview) return false;
+                    if (!d.preview.toLowerCase().includes(searchText.toLowerCase())) return false;
+                }
+                
+                return true;
+            });
+            
+            // Convert to Vis.js format
+            const visItems = filteredData.map(item => ({
+                id: item.id,
+                content: `Block ${item.block}`,
+                start: new Date(item.timestamp * 1000),
+                group: item.type,
+                className: `type-${item.type}`,
+                title: createTooltip(item),
+                block: item.block,
+                size: item.size,
+                fileType: item.type  // Use fileType instead of type (which is reserved by Vis.js)
+            }));
+            
+            items.clear();
+            items.add(visItems);
+        }
+        
+        function createTooltip(item) {
+            const sizeKB = (item.size / 1024).toFixed(1);
+            let tooltip = `Block: ${item.block}\n`;
+            tooltip += `Size: ${sizeKB}KB\n`;
+            tooltip += `Type: ${item.type}\n`;
+            tooltip += `Miner: ${item.miner}\n`;
+            if (item.fee) tooltip += `Fee: ${item.fee} sats\n`;
+            if (item.preview) tooltip += `\n${item.preview}`;
+            return tooltip;
+        }
+        
+        function updateStats() {
+            // Apply ALL filters (type, size, search) to match what's shown on timeline
+            const filteredData = allData.filter(d => {
+                // Type filter
+                if (!activeFilters.has(d.type)) return false;
+                
+                // Size filter (bytes)
+                if (minSizeBytes !== null && d.size < minSizeBytes) return false;
+                if (maxSizeBytes !== null && d.size > maxSizeBytes) return false;
+                
+                // Search text filter (only for text items)
+                if (searchText && d.type === 'text') {
+                    if (!d.preview) return false;
+                    if (!d.preview.toLowerCase().includes(searchText.toLowerCase())) return false;
+                }
+                
+                return true;
+            });
+            
+            const totalSize = filteredData.reduce((sum, d) => sum + d.size, 0);
+            const avgSize = filteredData.length > 0 ? totalSize / filteredData.length : 0;
+            
+            // Count by type
+            const typeCounts = {};
+            filteredData.forEach(d => {
+                typeCounts[d.type] = (typeCounts[d.type] || 0) + 1;
+            });
+            
+            const typeBreakdown = Object.entries(typeCounts)
+                .map(([type, count]) => `${type}: ${count}`)
+                .join(', ');
+            
+            document.getElementById('statsBar').innerHTML = `
+                <div class="stat">
+                    <span class="stat-label">Total Items:</span>
+                    <span class="stat-value">${filteredData.length}</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Total Size:</span>
+                    <span class="stat-value">${(totalSize / 1024 / 1024).toFixed(2)} MB</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Avg Size:</span>
+                    <span class="stat-value">${(avgSize / 1024).toFixed(1)} KB</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Types:</span>
+                    <span class="stat-value">${typeBreakdown}</span>
+                </div>
+            `;
+        }
+        
+        function openModal(item) {
+            const modal = document.getElementById('modal');
+            const modalContent = modal.querySelector('.modal-content');
+            const title = document.getElementById('modalTitle');
+            const meta = document.getElementById('modalMeta');
+            const preview = document.getElementById('modalPreview');
+            
+            // Make modal wide for text content, normal for media
+            if (item.type === 'text') {
+                modalContent.classList.add('wide');
+            } else {
+                modalContent.classList.remove('wide');
+            }
+            
+            title.textContent = `Block ${item.block} - ${item.type.toUpperCase()}`;
+            
+            // Meta information
+            meta.innerHTML = `
+                <div class="meta-item">
+                    <div class="meta-label">Block Number</div>
+                    <div class="meta-value">${item.block}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Date</div>
+                    <div class="meta-value">${new Date(item.timestamp * 1000).toLocaleString()}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Transaction ID</div>
+                    <div class="meta-value" style="font-size: 0.8em; word-break: break-all;">${item.txid}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Size</div>
+                    <div class="meta-value">${(item.size / 1024).toFixed(1)} KB (${item.size.toLocaleString()} bytes)</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">File Type</div>
+                    <div class="meta-value">${item.type} (${item.mime})</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Mined By</div>
+                    <div class="meta-value">${item.miner}</div>
+                </div>
+                ${item.fee ? `
+                <div class="meta-item">
+                    <div class="meta-label">Transaction Fee</div>
+                    <div class="meta-value">${item.fee} sats (${item.feeRate?.toFixed(2)} sats/vbyte)</div>
+                </div>
+                ` : ''}
+            `;
+            
+            // Preview
+            if (item.hasDecoded && item.type === 'text') {
+                // Load full text content
+                const textPath = `op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}_decoded.txt`;
+                fetch(textPath)
+                    .then(response => response.text())
+                    .then(fullText => {
+                        preview.innerHTML = `
+                            <h3 style="margin-bottom: 15px; color: #00ffff;">Text Content:</h3>
+                            <div class="preview-text">${escapeHtml(fullText)}</div>
+                        `;
+                    })
+                    .catch(error => {
+                        preview.innerHTML = `
+                            <h3 style="margin-bottom: 15px; color: #00ffff;">Text Content:</h3>
+                            <div class="preview-text">${escapeHtml(item.preview || 'Unable to load full content')}</div>
+                        `;
+                    });
+            } else if (item.hasFile && ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(item.type)) {
+                const imgPath = `op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}.${item.type}`;
+                preview.innerHTML = `
+                    <h3 style="margin-bottom: 15px; color: #ff00ff;">Image Preview:</h3>
+                    <div class="preview-image">
+                        <img src="${imgPath}" alt="OP_RETURN Image" onerror="this.src=''; this.alt='Image failed to load'">
+                    </div>
+                `;
+            } else if (item.hasFile && ['mp4', 'webm', 'avi', 'mov'].includes(item.type)) {
+                const videoPath = `op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}.${item.type}`;
+                preview.innerHTML = `
+                    <h3 style="margin-bottom: 15px; color: #ffff00;">Video Preview:</h3>
+                    <div class="preview-image" style="text-align: center;">
+                        <video controls style="max-width: 100%; max-height: 500px; border-radius: 8px; border: 2px solid #333; background: #000;">
+                            <source src="${videoPath}" type="video/${item.type === 'mov' ? 'quicktime' : item.type}">
+                            Your browser does not support the video tag.
+                        </video>
+                    </div>
+                `;
+            } else if (item.hasFile && ['mp3', 'ogg', 'wav', 'flac'].includes(item.type)) {
+                const audioPath = `op_return_data/${item.blockDir}/tx_${item.txid}_${item.vout}.${item.type}`;
+                preview.innerHTML = `
+                    <h3 style="margin-bottom: 15px; color: #00ff00;">Audio Preview:</h3>
+                    <div style="text-align: center; padding: 30px;">
+                        <audio controls style="width: 100%; max-width: 500px;">
+                            <source src="${audioPath}" type="audio/${item.type === 'mp3' ? 'mpeg' : item.type}">
+                            Your browser does not support the audio tag.
+                        </audio>
+                    </div>
+                `;
+            } else {
+                preview.innerHTML = `<p style="color: #888;">No preview available</p>`;
+            }
+            
+            modal.classList.add('active');
+        }
+        
+        function closeModal() {
+            document.getElementById('modal').classList.remove('active');
+            timeline.setSelection([]);
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Size filter
+        function applySizeFilter() {
+            const minVal = document.getElementById('minSize').value;
+            const maxVal = document.getElementById('maxSize').value;
+            
+            minSizeBytes = minVal ? parseInt(minVal) : null;
+            maxSizeBytes = maxVal ? parseInt(maxVal) : null;
+            
+            updateItems();
+            updateStats();
+        }
+        
+        // Search filter
+        function applySearchFilter() {
+            searchText = document.getElementById('searchInput').value.trim();
+            
+            // When user searches text, automatically show only text items
+            if (searchText) {
+                // Clear all filters first
+                activeFilters.clear();
+                // Enable only text filter
+                activeFilters.add('text');
+                updateFilterChips();
+            }
+            
+            updateItems();
+            updateStats();
+        }
+        
+        // Clear search
+        function clearSearch() {
+            document.getElementById('searchInput').value = '';
+            searchText = '';
+            updateItems();
+            updateStats();
+        }
+        
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+        
+        // Close modal when clicking outside
+        document.getElementById('modal').addEventListener('click', (e) => {
+            if (e.target.id === 'modal') closeModal();
+        });
+        
+        // Initialize on page load
+        loadTimelineData();
+    </script>
+</body>
+</html>
+

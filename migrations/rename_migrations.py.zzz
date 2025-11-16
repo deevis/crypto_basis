@@ -1,0 +1,34 @@
+import os
+from datetime import datetime, timedelta
+
+# Start with a base timestamp for the first migration
+base_time = datetime(2024, 3, 1, 0, 0, 0)
+
+# Map of current names to new names (in order of creation)
+migration_map = {
+    'create_migration_table.py': '20240301000000_create_migration_table.py',
+    'add_available_to_spend.py': '20240301000100_add_available_to_spend.py',
+    'add_transaction_fulfillments.py': '20240301000200_add_transaction_fulfillments.py',
+    'add_wallet_transfers.py': '20240301000300_add_wallet_transfers.py',
+    'remove_linked_transaction.py': '20240301000400_remove_linked_transaction.py',
+    'add_exchanges.py': '20240301000500_add_exchanges.py',
+    'add_term_type.py': '20240301000600_add_term_type.py',
+    'add_acquisition_details.py': '20240301000700_add_acquisition_details.py',
+    'add_exchange_fee.py': '20240301000800_add_exchange_fee.py',
+}
+
+def rename_migrations():
+    migration_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    for old_name, new_name in migration_map.items():
+        old_path = os.path.join(migration_dir, old_name)
+        new_path = os.path.join(migration_dir, new_name)
+        
+        if os.path.exists(old_path):
+            os.rename(old_path, new_path)
+            print(f"Renamed {old_name} to {new_name}")
+        else:
+            print(f"Warning: Could not find {old_name}")
+
+if __name__ == "__main__":
+    rename_migrations() 
