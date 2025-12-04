@@ -87,6 +87,10 @@ def scan_op_return_data(data_dir='bitcoin_large_op_returns/op_return_data'):
                 size = metadata.get('data_size', 0)
                 file_type = metadata.get('file_type', 'unknown')
                 mime_type = metadata.get('mime_type', '')
+                storage_format = metadata.get('storage_format', 'raw')
+                # Infer 'text' storage format for text file types that have 'raw' (for backward compatibility)
+                if file_type == 'text' and storage_format == 'raw':
+                    storage_format = 'text'
                 miner = metadata.get('mined_by', 'Unknown')
                 
                 # Fee information
@@ -146,6 +150,7 @@ def scan_op_return_data(data_dir='bitcoin_large_op_returns/op_return_data'):
                     'size': size,
                     'type': file_type,
                     'mime': mime_type,
+                    'storageFormat': storage_format,
                     'miner': miner,
                     'fee': fee,
                     'feeRate': fee_rate,

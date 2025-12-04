@@ -38,7 +38,7 @@ def save_run_summary(summary_data):
         log_dir = ensure_log_directory()
         summary_file = log_dir / generate_run_summary_filename()
         
-        with open(summary_file, 'w', encoding='utf-8') as f:
+        with open(summary_file, 'w', encoding='utf-8', newline='\n') as f:
             json.dump(summary_data, f, indent=2, default=str)
         
         logger.info(f"📄 Run summary saved to: {summary_file}")
@@ -107,7 +107,7 @@ def save_activity_data(activity_file_path, activity_data):
         # Sort by date (newest first)
         activity_data.sort(key=lambda x: x.get('date', ''), reverse=True)
         
-        with open(activity_file_path, 'w', encoding='utf-8') as f:
+        with open(activity_file_path, 'w', encoding='utf-8', newline='\n') as f:
             json.dump(activity_data, f, indent=2, default=str)
         return True
     except Exception as e:

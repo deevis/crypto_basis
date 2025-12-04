@@ -289,6 +289,7 @@ class LargeOPReturn(Base):
     file_type = Column(String(20))  # jpg, pdf, text, binary, etc.
     mime_type = Column(String(100))
     is_text = Column(Boolean, default=False)
+    storage_format = Column(String(50))  # 'base64', 'data_uri', 'raw', 'hex', 'gzip', etc.
     
     # Transaction fee information
     tx_fee = Column(Integer)  # Total transaction fee in satoshis
