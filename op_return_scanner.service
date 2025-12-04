@@ -1,0 +1,29 @@
+[Unit]
+Description=Bitcoin OP_RETURN Scanner - Continual Scanning
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/crypto_basis
+Environment="PATH=/home/ubuntu/crypto_basis/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/ubuntu/crypto_basis/venv/bin/python3 /home/ubuntu/crypto_basis/op_return_scanner.py --continual-scanning --interval 60 --heartbeat 360
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=op_return_scanner
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits (adjust as needed)
+MemoryLimit=2G
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target
+
