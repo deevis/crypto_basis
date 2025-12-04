@@ -2337,8 +2337,9 @@ class OPReturnScanner:
                 logger.info(f"   Changes detected:")
                 for line in result.stdout.strip().split('\n')[:10]:  # Show first 10 files
                     logger.info(f"     {line}")
-                if result.stdout.count('\n') > 10:
-                    logger.info(f"     ... and {result.stdout.count('\n') - 10} more files")
+                newline_count = result.stdout.count('\n')
+                if newline_count > 10:
+                    logger.info(f"     ... and {newline_count - 10} more files")
                 
                 # Add all changes
                 subprocess.run(
