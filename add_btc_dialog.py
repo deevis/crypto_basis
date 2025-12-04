@@ -4,7 +4,8 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
 from PyQt6.QtCore import Qt, QDateTime, QThread, pyqtSignal
 from db_config import SessionLocal
 from models import Transaction, OperationType, Exchange
-from btc_service import BTCService
+from btc_service import BTCService, AddressNotFoundInTransactionError
+from transaction_details_dialog import TransactionDetailsDialog
 from datetime import datetime
 import threading
 import logging
@@ -16,6 +17,7 @@ class ScanWorker(QThread):
     progress = pyqtSignal(str)  # Emit progress updates
     finished = pyqtSignal(dict)  # Emit result
     error = pyqtSignal(str)      # Emit errors
+    address_mismatch = pyqtSignal(object, str)  # Emit exception and address for address mismatch
     
     def __init__(self, btc_service, address, expected_date, txid=None):
         super().__init__()
@@ -36,6 +38,10 @@ class ScanWorker(QThread):
             result = self.btc_service.get_transaction_details(self.address, self.expected_date, self.txid)
             if not self.abort:
                 self.finished.emit(result)
+        except AddressNotFoundInTransactionError as e:
+            if not self.abort:
+                # Emit special signal for address mismatch - caller will handle dialog
+                self.address_mismatch.emit(e, self.address)
         except Exception as e:
             if not self.abort:
                 self.error.emit(str(e))
@@ -191,6 +197,7 @@ class AddBTCDialog(QDialog):
             self.current_worker.progress.connect(self.update_progress)
             self.current_worker.finished.connect(self.scan_completed)
             self.current_worker.error.connect(self.scan_error)
+            self.current_worker.address_mismatch.connect(self.handle_address_mismatch)
             self.current_worker.start()
             
         except Exception as e:
@@ -223,6 +230,41 @@ class AddBTCDialog(QDialog):
     def scan_error(self, error_message):
         self.cleanup_scan()
         self.show_error(error_message)
+    
+    def handle_address_mismatch(self, exception, address):
+        """Handle case where address is not found in transaction outputs"""
+        self.cleanup_scan()
+        
+        # Show transaction details dialog to let user decide
+        dialog = TransactionDetailsDialog(exception.tx_data, address)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # User chose to force accept this transaction
+            logger.info("User forced acceptance of transaction")
+            
+            # Get block info for confirmations
+            try:
+                chain_info = self.btc_service._call_rpc("getblockchaininfo")
+                current_height = chain_info['blocks']
+                tx_height = self.btc_service._call_rpc("getblock", [exception.tx_data['blockhash']])['height']
+                confirmations = current_height - tx_height + 1
+            except Exception as e:
+                logger.warning(f"Could not get confirmations: {e}")
+                confirmations = 0
+            
+            # Create result dict similar to successful scan
+            result = {
+                'txid': exception.tx_data['txid'],
+                'amount': 0,  # Address not in outputs, so amount is 0
+                'date': datetime.fromtimestamp(exception.tx_data['time']),
+                'confirmations': confirmations,
+                'block_hash': exception.tx_data['blockhash']
+            }
+            
+            # Treat as successful scan completion
+            self.scan_completed(result)
+        else:
+            # User rejected - show error
+            self.show_error(f"Address {address} not found in transaction outputs")
     
     def cleanup_scan(self):
         self.progress_bar.hide()

@@ -4,7 +4,6 @@ import requests
 from datetime import datetime, timedelta
 import json
 import logging
-from transaction_details_dialog import TransactionDetailsDialog
 from decimal import Decimal
 import urllib.parse
 
@@ -15,6 +14,13 @@ logging.basicConfig(
     datefmt='%H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+class AddressNotFoundInTransactionError(Exception):
+    """Exception raised when an address is not found in a transaction's outputs"""
+    def __init__(self, message, tx_data=None, address=None):
+        super().__init__(message)
+        self.tx_data = tx_data
+        self.address = address
 
 class BTCService:
     def __init__(self, test_connection=True):
@@ -192,22 +198,12 @@ class BTCService:
                     
                     if not found:
                         logger.warning(f"Address {address} not found in transaction {txid}")
-                        
-                        # Show transaction details dialog
-                        dialog = TransactionDetailsDialog(tx, address)
-                        if dialog.exec() == QDialog.DialogCode.Accepted:
-                            # User chose to force accept this transaction
-                            logger.info("User forced acceptance of transaction")
-                            result = {
-                                'txid': txid,
-                                'amount': amount,  # Will be 0
-                                'date': datetime.fromtimestamp(tx['time']),
-                                'confirmations': self._call_rpc("getblock", [tx['blockhash']])['height'] - self._call_rpc("getblock", [tx['blockhash']])['height'] + 1,
-                                'block_hash': tx['blockhash']
-                            }
-                            return result
-                        else:
-                            raise ValueError(f"Address {address} not found in transaction outputs")
+                        # Raise exception with transaction data - let caller handle UI
+                        raise AddressNotFoundInTransactionError(
+                            f"Address {address} not found in transaction outputs",
+                            tx_data=tx,
+                            address=address
+                        )
                     
                     # Get current height for confirmations
                     chain_info = self._call_rpc("getblockchaininfo")
