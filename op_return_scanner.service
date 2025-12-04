@@ -9,7 +9,7 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/crypto_basis
 Environment="PATH=/home/ubuntu/crypto_basis/venv/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/home/ubuntu/crypto_basis/venv/bin/python3 /home/ubuntu/crypto_basis/op_return_scanner.py --continual-scanning --interval 60 --heartbeat 360
+ExecStart=/home/ubuntu/crypto_basis/venv/bin/python3 /home/ubuntu/crypto_basis/op_return_scanner.py --continual-scanning --interval 60 --heartbeat 3600
 Restart=always
 RestartSec=10
 StandardOutput=journal
