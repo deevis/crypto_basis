@@ -170,6 +170,13 @@ class BTCAddressMonitorDialog(QDialog):
             
             addresses = query.all()
             
+            # Ensure all active addresses are in the watch wallet
+            active_addresses = [a for a in addresses if a.monitor_status == 'active']
+            if active_addresses and btc_service.is_available:
+                imported, failed = self.ensure_addresses_in_watch_wallet(btc_service, active_addresses)
+                if imported > 0:
+                    logger.info(f"Imported {imported} missing addresses to watch wallet")
+            
             # Pre-fetch block timestamps for efficiency
             block_timestamps = {}
             if btc_service.is_available:
@@ -267,6 +274,83 @@ class BTCAddressMonitorDialog(QDialog):
         
         return widget
     
+    def ensure_addresses_in_watch_wallet(self, btc_service, addresses):
+        """Ensure all monitored addresses are imported to the Bitcoin Core watch wallet"""
+        if not btc_service.is_available:
+            return 0, 0
+        
+        try:
+            btc_service.load_watch_wallet()
+        except Exception as e:
+            if "is already loaded" not in str(e):
+                logger.error(f"Failed to load watch wallet: {e}")
+                return 0, 0
+        
+        # Get addresses already in wallet
+        try:
+            wallet_addresses = set()
+            received = btc_service._call_rpc("listreceivedbyaddress", [0, True, True])
+            for addr_info in received:
+                wallet_addresses.add(addr_info.get('address'))
+            
+            # Also check labels for imported addresses with no transactions
+            labels = btc_service._call_rpc("listlabels", [])
+            for label in labels:
+                label_addrs = btc_service._call_rpc("getaddressesbylabel", [label])
+                if label_addrs:
+                    wallet_addresses.update(label_addrs.keys())
+        except Exception as e:
+            logger.warning(f"Could not get wallet addresses: {e}")
+            wallet_addresses = set()
+        
+        # Find missing addresses
+        imported = 0
+        failed = 0
+        
+        for addr in addresses:
+            if addr.bitcoin_address not in wallet_addresses:
+                try:
+                    # Get timestamp from origin block
+                    start_timestamp = None
+                    if addr.origin_block_number:
+                        try:
+                            block_hash = btc_service._call_rpc("getblockhash", [addr.origin_block_number])
+                            block_info = btc_service._call_rpc("getblockheader", [block_hash])
+                            start_timestamp = block_info.get('time')
+                        except Exception:
+                            pass
+                    
+                    if not start_timestamp:
+                        from datetime import timedelta
+                        one_month_ago = datetime.now() - timedelta(days=30)
+                        start_timestamp = int(one_month_ago.timestamp())
+                    
+                    # Import the address
+                    import_request = [{
+                        "scriptPubKey": {"address": addr.bitcoin_address},
+                        "timestamp": start_timestamp,
+                        "watchonly": True,
+                        "label": f"monitored-{addr.bitcoin_address[:8]}",
+                        "rescan": False  # Don't rescan individually
+                    }]
+                    
+                    result = btc_service._call_rpc("importmulti", [import_request, {"rescan": False}])
+                    
+                    if result and len(result) > 0 and result[0].get('success'):
+                        imported += 1
+                        logger.info(f"Imported {addr.bitcoin_address} to watch wallet")
+                    else:
+                        # Try fallback
+                        btc_service._call_rpc("importaddress", [addr.bitcoin_address, f"monitored-{addr.bitcoin_address[:8]}", False])
+                        imported += 1
+                        logger.info(f"Imported {addr.bitcoin_address} via fallback")
+                        
+                except Exception as e:
+                    failed += 1
+                    logger.warning(f"Failed to import {addr.bitcoin_address}: {e}")
+        
+        return imported, failed
+
     def update_all_addresses(self):
         """Update all addresses with current blockchain information"""
         # Get current block
@@ -297,6 +381,12 @@ class BTCAddressMonitorDialog(QDialog):
             addresses = db.query(BTCAddressMonitoring)\
                 .filter(BTCAddressMonitoring.monitor_status == 'active')\
                 .all()
+            
+            # First, ensure all addresses are in the watch wallet
+            imported, failed = self.ensure_addresses_in_watch_wallet(btc_service, addresses)
+            if imported > 0:
+                logger.info(f"Imported {imported} addresses to watch wallet")
+                # Note: addresses are imported without rescan, user may need manual rescan
             
             if not addresses:
                 QMessageBox.information(self, "No Addresses", "No active addresses to update")

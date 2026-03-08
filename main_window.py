@@ -183,6 +183,10 @@ class MainWindow(QMainWindow):
         add_btc_action = bitcoin_menu.addAction("Add &BTC Transaction...")
         add_btc_action.triggered.connect(self.show_add_btc_dialog)
         
+        split_tx_action = bitcoin_menu.addAction("Add &Split Transaction...")
+        split_tx_action.setStatusTip("Add a transaction with multiple output addresses")
+        split_tx_action.triggered.connect(self.show_split_transaction_dialog)
+        
         import_btc_action = bitcoin_menu.addAction("Import BTC &UTXOs...")
         import_btc_action.triggered.connect(self.show_btc_import_dialog)
         
@@ -488,6 +492,16 @@ class MainWindow(QMainWindow):
                 edit_button.clicked.connect(lambda checked, tx=tx: self.show_edit_transaction_dialog(tx))
                 button_layout.addWidget(edit_button)
                 
+                # Add "Mark Spent" button for BTC IN transactions with available balance
+                if (tx.currency_ticker == "BTC" and 
+                    tx.operation_type == OperationType.IN and 
+                    tx.available_to_spend and tx.available_to_spend > 0):
+                    mark_spent_btn = QPushButton("Mark Spent")
+                    mark_spent_btn.setFixedWidth(75)
+                    mark_spent_btn.setToolTip("Mark this UTXO as spent by providing the spending transaction ID")
+                    mark_spent_btn.clicked.connect(lambda checked, tx=tx: self.show_mark_spent_dialog(tx))
+                    button_layout.addWidget(mark_spent_btn)
+                
                 # Add other buttons based on transaction type
                 if tx.operation_type == OperationType.OUT:
                     fulfill_button = QPushButton("Manage Fulfillments")
@@ -778,6 +792,13 @@ class MainWindow(QMainWindow):
         dialog = RealizedGainsDialog(self)
         dialog.exec()
 
+    def show_split_transaction_dialog(self):
+        """Show dialog to add a split transaction with multiple outputs"""
+        from split_transaction_dialog import SplitTransactionDialog
+        dialog = SplitTransactionDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.refresh_all()
+    
     def show_add_btc_dialog(self):
         """Show dialog to add a new BTC transaction"""
         # Get currently selected wallet from summary table
@@ -867,6 +888,13 @@ class MainWindow(QMainWindow):
             transaction=transaction,  # Pass the transaction for editing
             parent=self
         )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.refresh_all()
+
+    def show_mark_spent_dialog(self, transaction):
+        """Show dialog to mark an IN transaction UTXO as spent"""
+        from mark_spent_dialog import MarkSpentDialog
+        dialog = MarkSpentDialog(transaction, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.refresh_all()
 

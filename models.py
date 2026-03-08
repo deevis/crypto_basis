@@ -312,4 +312,193 @@ class LargeOPReturn(Base):
         Index('idx_large_op_returns_file_type', 'file_type'),
         Index('idx_large_op_returns_fee_rate', 'fee_rate'),
         CheckConstraint('data_size > 83', name='check_op_return_size'),
+    )
+
+
+class TraceTerminationReason(enum.Enum):
+    """Reasons why a UTXO trace was terminated"""
+    PENDING = "PENDING"           # Not yet traced
+    COINBASE = "COINBASE"         # Reached a coinbase (mining) transaction
+    EXCHANGE = "EXCHANGE"         # Reached an exchange-like transaction
+    MAX_HOPS = "MAX_HOPS"         # Reached maximum hop limit
+    MAX_TRANSACTIONS = "MAX_TRANSACTIONS"  # Reached max total transactions explored
+    ERROR = "ERROR"               # Error during tracing
+
+
+class TransactionBoundaryType(enum.Enum):
+    """Type of boundary transaction (where tracing stops)"""
+    NONE = "NONE"           # Not a boundary - user activity
+    COINBASE = "COINBASE"   # Mining reward
+    EXCHANGE = "EXCHANGE"   # Exchange transaction
+
+
+class BTCTracedTransaction(Base):
+    """
+    Unique transactions discovered during UTXO tracing.
+    Each transaction is stored ONCE regardless of how many traces encounter it.
+    """
+    __tablename__ = 'btc_traced_transactions'
+    
+    id = Column(Integer, primary_key=True)
+    txid = Column(String(64), nullable=False, unique=True)
+    
+    # Block information
+    block_height = Column(Integer)
+    block_time = Column(DateTime)
+    
+    # Transaction characteristics
+    input_count = Column(Integer)
+    output_count = Column(Integer)
+    
+    # Boundary flags
+    is_coinbase = Column(Boolean, default=False)
+    is_exchange_like = Column(Boolean, default=False)
+    boundary_type = Column(Enum(TransactionBoundaryType), default=TransactionBoundaryType.NONE)
+    
+    # Exchange detection details (JSON)
+    exchange_indicators = Column(Text)
+    
+    # Tracking
+    first_seen_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    
+    # Relationships
+    outputs = relationship("BTCTransactionFlow", foreign_keys="BTCTransactionFlow.from_txid_id", back_populates="from_transaction")
+    inputs = relationship("BTCTransactionFlow", foreign_keys="BTCTransactionFlow.to_txid_id", back_populates="to_transaction")
+    
+    __table_args__ = (
+        Index('idx_traced_tx_txid', 'txid'),
+        Index('idx_traced_tx_boundary', 'boundary_type'),
+        Index('idx_traced_tx_block', 'block_height'),
+    )
+
+
+class BTCTracedAddress(Base):
+    """
+    Unique addresses encountered during UTXO tracing.
+    Links to monitored addresses when applicable.
+    """
+    __tablename__ = 'btc_traced_addresses'
+    
+    id = Column(Integer, primary_key=True)
+    address = Column(String(100), nullable=False, unique=True)
+    
+    # Monitoring link (if this is one of our monitored addresses)
+    is_monitored = Column(Boolean, default=False)
+    monitoring_id = Column(Integer, ForeignKey('btc_address_monitoring.id'), nullable=True)
+    
+    # Heuristic flags
+    is_exchange_address = Column(Boolean, default=False)
+    
+    # Statistics
+    first_seen_block = Column(Integer)
+    last_seen_block = Column(Integer)
+    total_received = Column(Numeric(18, 8), default=0)
+    total_sent = Column(Numeric(18, 8), default=0)
+    
+    # Tracking
+    first_seen_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    
+    # Relationships
+    monitoring_entry = relationship("BTCAddressMonitoring", backref="traced_address")
+    
+    __table_args__ = (
+        Index('idx_traced_addr_address', 'address'),
+        Index('idx_traced_addr_monitored', 'is_monitored'),
+    )
+
+
+class BTCTransactionFlow(Base):
+    """
+    Edges in the transaction graph - represents spending relationships.
+    from_txid:from_vout was spent by to_txid:to_vin
+    """
+    __tablename__ = 'btc_transaction_flows'
+    
+    id = Column(Integer, primary_key=True)
+    
+    # Source output (the UTXO being spent)
+    from_txid_id = Column(Integer, ForeignKey('btc_traced_transactions.id'), nullable=False)
+    from_vout = Column(Integer, nullable=False)  # Output index
+    
+    # Destination input (the transaction spending it)
+    to_txid_id = Column(Integer, ForeignKey('btc_traced_transactions.id'), nullable=False)
+    to_vin = Column(Integer, nullable=False)  # Input index
+    
+    # Flow details
+    amount = Column(Numeric(18, 8), nullable=False)
+    
+    # Address information (for convenience in graph queries)
+    from_address_id = Column(Integer, ForeignKey('btc_traced_addresses.id'), nullable=True)
+    to_address_id = Column(Integer, ForeignKey('btc_traced_addresses.id'), nullable=True)
+    
+    # Tracking
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    
+    # Relationships
+    from_transaction = relationship("BTCTracedTransaction", foreign_keys=[from_txid_id], back_populates="outputs")
+    to_transaction = relationship("BTCTracedTransaction", foreign_keys=[to_txid_id], back_populates="inputs")
+    from_address = relationship("BTCTracedAddress", foreign_keys=[from_address_id])
+    to_address = relationship("BTCTracedAddress", foreign_keys=[to_address_id])
+    
+    __table_args__ = (
+        # Unique constraint: each spending relationship is unique
+        UniqueConstraint('from_txid_id', 'from_vout', 'to_txid_id', 'to_vin', name='unique_flow'),
+        Index('idx_flow_from_tx', 'from_txid_id'),
+        Index('idx_flow_to_tx', 'to_txid_id'),
+        Index('idx_flow_from_addr', 'from_address_id'),
+        Index('idx_flow_to_addr', 'to_address_id'),
+    )
+
+
+class BTCUTXOTraceHistory(Base):
+    """
+    Stores the backwards trace history of UTXOs.
+    Each row represents one "hop" in the trace from a monitored UTXO back to its origin.
+    """
+    __tablename__ = 'btc_utxo_trace_history'
+    
+    id = Column(Integer, primary_key=True)
+    
+    # Link to the original UTXO we're tracing from
+    root_utxo_id = Column(Integer, ForeignKey('btc_address_utxos.id', ondelete='CASCADE'), nullable=False)
+    
+    # Hop information (0 = the root UTXO itself, 1 = first hop back, etc.)
+    hop_number = Column(Integer, nullable=False)
+    
+    # Transaction at this hop
+    txid = Column(String(64), nullable=False)
+    vout = Column(Integer, nullable=False)  # Output index that was spent
+    amount = Column(Numeric(18, 8), nullable=False)
+    
+    # Block information
+    block_height = Column(Integer)
+    block_time = Column(DateTime)
+    
+    # Source address (if determinable)
+    source_address = Column(String(100))
+    
+    # Transaction characteristics for exchange detection
+    input_count = Column(Integer)   # Number of inputs in the tx
+    output_count = Column(Integer)  # Number of outputs in the tx
+    
+    # Termination flags
+    is_coinbase = Column(Boolean, default=False)
+    is_exchange_like = Column(Boolean, default=False)
+    exchange_indicators = Column(Text)  # JSON: reasons why we think it's exchange-like
+    
+    # Trace status
+    termination_reason = Column(Enum(TraceTerminationReason), default=TraceTerminationReason.PENDING)
+    
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    
+    # Relationships
+    root_utxo = relationship("BTCAddressUTXO", backref="trace_history")
+    
+    # Constraints and indexes
+    __table_args__ = (
+        # Unique constraint: one entry per hop per root UTXO per txid:vout
+        UniqueConstraint('root_utxo_id', 'hop_number', 'txid', 'vout', name='unique_trace_hop'),
+        Index('idx_trace_root_utxo', 'root_utxo_id'),
+        Index('idx_trace_txid', 'txid'),
+        Index('idx_trace_termination', 'termination_reason'),
     ) 

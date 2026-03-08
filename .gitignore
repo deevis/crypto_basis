@@ -42,3 +42,4 @@ data/
 
 # Monitor sets - ignore generated activity data
 monitor_sets/addresses_of_interest/*.json
+btc_graph.cypher

@@ -471,6 +471,251 @@ class NotificationManager:
         
         if self.sms_enabled:
             self.send_sms(body)
+    
+    def notify_bip_signal(self, bip_signal_data):
+        """Send notification about BIP signaling detected in a block
+        
+        Args:
+            bip_signal_data: dict with BIP signaling info (from BIPDetector.detect_bip110)
+        """
+        if not self.any_enabled or not bip_signal_data:
+            return
+        
+        bip_name = bip_signal_data.get('bip', 'BIP')
+        block_number = bip_signal_data.get('block_number')
+        mined_by = bip_signal_data.get('mined_by', 'Unknown')
+        block_time = bip_signal_data.get('block_time', '')
+        detection_methods = bip_signal_data.get('detection_methods', [])
+        coinbase_text = bip_signal_data.get('coinbase_text')
+        
+        subject = f"🔔 {bip_name} Signal Detected!"
+        
+        # Build message body
+        lines = [
+            f"{bip_name} signal detected in block {block_number}",
+            f"",
+            f"Block: {block_number}",
+            f"Mined by: {mined_by}",
+            f"Time: {block_time}",
+            f"Detection methods: {', '.join(detection_methods)}",
+        ]
+        
+        if coinbase_text:
+            # Show coinbase text preview (first 200 chars)
+            coinbase_preview = coinbase_text[:200]
+            if len(coinbase_text) > 200:
+                coinbase_preview += "..."
+            lines.append(f"")
+            lines.append(f"Coinbase text preview:")
+            lines.append(f"{coinbase_preview}")
+        
+        body = "\n".join(lines)
+        
+        # Build HTML message for Telegram
+        html_lines = [
+            f"<b>🔔 {bip_name} Signal Detected!</b>",
+            f"",
+            f"<b>Block:</b> {block_number}",
+            f"<b>Mined by:</b> {mined_by}",
+            f"<b>Time:</b> {block_time}",
+            f"<b>Detection methods:</b> {', '.join(detection_methods)}",
+        ]
+        
+        if coinbase_text:
+            coinbase_preview = coinbase_text[:200]
+            if len(coinbase_text) > 200:
+                coinbase_preview += "..."
+            html_lines.append(f"")
+            html_lines.append(f"<b>Coinbase text preview:</b>")
+            html_lines.append(f"<pre>{coinbase_preview}</pre>")
+        
+        html_body = "\n".join(html_lines)
+        
+        # Build Discord message (Markdown format)
+        discord_lines = [
+            f"🔔 **{bip_name} Signal Detected!**",
+            f"",
+            f"**Block:** {block_number}",
+            f"**Mined by:** {mined_by}",
+            f"**Time:** {block_time}",
+            f"**Detection methods:** {', '.join(detection_methods)}",
+        ]
+        
+        if coinbase_text:
+            coinbase_preview = coinbase_text[:200]
+            if len(coinbase_text) > 200:
+                coinbase_preview += "..."
+            discord_lines.append(f"")
+            discord_lines.append(f"**Coinbase text preview:**")
+            discord_lines.append(f"```\n{coinbase_preview}\n```")
+        
+        discord_msg = "\n".join(discord_lines)
+        
+        # Send via all enabled channels
+        self.send_email(subject, body)
+        self.send_telegram(html_body)
+        self.send_discord(discord_msg)
+        
+        if self.sms_enabled:
+            self.send_sms(body)
+
+class BIPDetector:
+    """Detects BIP signaling in Bitcoin blocks
+    
+    Supports multiple BIPs with extensible detection methods:
+    - BIP-110: Block size increase proposals (coinbase text patterns, version bits)
+    - Can be extended for other BIPs
+    """
+    
+    def __init__(self, bip_blocks_dir):
+        """Initialize BIP detector
+        
+        Args:
+            bip_blocks_dir: Path to directory where BIP block data is stored (e.g., bitcoin_large_op_returns/bip_blocks)
+        """
+        self.bip_blocks_dir = Path(bip_blocks_dir)
+        self.bip_blocks_dir.mkdir(exist_ok=True, parents=True)
+        
+        # BIP-110 detection patterns (coinbase text fallback - primary detection is version bit 4)
+        # BIP-110 is about temporarily limiting arbitrary data in Bitcoin
+        # Primary detection method: version bit 4 (0x10) in block version field
+        # These patterns are fallback/confirmation patterns in coinbase text
+        self.bip110_patterns = [
+            'bip110',
+            'bip-110',
+            'bip 110',
+            'limit data',
+            'limit op_return',
+            'clean up',
+            'data limit',
+        ]
+    
+    def detect_bip110(self, coinbase_tx, block_header, block_number, block_time, mined_by):
+        """Detect BIP-110 signaling in a block
+        
+        Args:
+            coinbase_tx: Coinbase transaction dict
+            block_header: Block header dict (contains version, etc.)
+            block_number: Block number
+            block_time: Block timestamp (datetime)
+            mined_by: Miner/pool name
+            
+        Returns:
+            dict with BIP-110 signaling info if detected, None otherwise
+        """
+        detected = False
+        detection_methods = []
+        coinbase_text = None
+        
+        # Method 1: Check coinbase text for BIP-110 patterns
+        if coinbase_tx and coinbase_tx.get('vin'):
+            coinbase_input = coinbase_tx['vin'][0]
+            if 'coinbase' in coinbase_input:
+                coinbase_hex = coinbase_input['coinbase']
+                try:
+                    coinbase_bytes = bytes.fromhex(coinbase_hex)
+                    coinbase_text = coinbase_bytes.decode('ascii', errors='ignore').lower()
+                    
+                    # Debug: Log coinbase text for blocks we're specifically checking
+                    # This helps identify new patterns
+                    if block_number in [938903]:  # Known BIP-110 block
+                        logger.debug(f"   Coinbase text for block {block_number}: {repr(coinbase_text[:500])}")
+                    
+                    # Check for BIP-110 patterns
+                    for pattern in self.bip110_patterns:
+                        pattern_lower = pattern.lower()
+                        if pattern_lower in coinbase_text:
+                            detected = True
+                            detection_methods.append(f"coinbase_text:{pattern}")
+                            break
+                except Exception as e:
+                    logger.debug(f"   Error decoding coinbase for block {block_number}: {e}")
+                    pass
+        
+        # Method 2: Check block version bits (BIP-9 style signaling)
+        # BIP-110 uses version bit 4 (0x10) for signaling
+        # Bit 29 (0x20000000) indicates BIP-9 signaling is active
+        # Bit 4 (0x10) specifically signals BIP-110 support
+        if block_header and 'version' in block_header:
+            version = block_header['version']
+            # Check if version has BIP-9 signaling bit set (bit 29)
+            bip9_active = version & 0x20000000  # Bit 29 set indicates BIP-9 signaling
+            # Check if bit 4 is set (BIP-110 specific signal)
+            bip110_bit = version & 0x10  # Bit 4 signals BIP-110
+            
+            if bip9_active and bip110_bit:
+                detected = True
+                detection_methods.append(f"version_bit_4:0x{version:08x}")
+            elif bip9_active:
+                # BIP-9 active but not BIP-110 - log for analysis
+                detection_methods.append(f"version_bits_other:0x{version:08x}")
+        
+        if detected:
+            return {
+                'bip': 'BIP-110',
+                'block_number': block_number,
+                'block_time': block_time.isoformat(),
+                'mined_by': mined_by or 'Unknown',
+                'detection_methods': detection_methods,
+                'coinbase_text': coinbase_text if coinbase_text else None,
+                'block_version': block_header.get('version') if block_header else None,
+            }
+        
+        return None
+    
+    def save_bip_signal(self, bip_name, signal_data):
+        """Save BIP signaling data to JSONL file
+        
+        Args:
+            bip_name: BIP identifier (e.g., 'bip-110')
+            signal_data: dict with signaling information
+            
+        Returns:
+            True if saved (or already exists), False on error
+        """
+        # Normalize BIP name (e.g., 'BIP-110' -> 'bip-110')
+        bip_name_normalized = bip_name.lower().replace('_', '-')
+        jsonl_file = self.bip_blocks_dir / f"{bip_name_normalized}.jsonl"
+        
+        block_number = signal_data.get('block_number')
+        if block_number is None:
+            logger.warning(f"BIP signal data missing block_number, skipping save")
+            return False
+        
+        # Check if block already exists in file
+        existing_blocks = set()
+        if jsonl_file.exists():
+            try:
+                with open(jsonl_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                            existing_block = entry.get('block_number')
+                            if existing_block is not None:
+                                existing_blocks.add(existing_block)
+                        except json.JSONDecodeError:
+                            # Skip malformed lines
+                            continue
+            except Exception as e:
+                logger.debug(f"Error reading existing BIP signals from {jsonl_file}: {e}")
+        
+        # Skip if block already exists
+        if block_number in existing_blocks:
+            logger.debug(f"Block {block_number} already in {jsonl_file.name}, skipping duplicate")
+            return True
+        
+        # Append to JSONL file (one JSON object per line)
+        try:
+            with open(jsonl_file, 'a', encoding='utf-8', newline='\n') as f:
+                json.dump(signal_data, f, ensure_ascii=False)
+                f.write('\n')
+            return True
+        except Exception as e:
+            logger.warning(f"Error saving BIP signal to {jsonl_file}: {e}")
+            return False
 
 class OPReturnScanner:
     def __init__(self, output_dir="bitcoin_large_op_returns/op_return_data", use_database=True, auto_sync_git=None):
@@ -481,6 +726,10 @@ class OPReturnScanner:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
         self.use_database = use_database
+        
+        # Initialize BIP detector (bip_blocks directory next to op_return_data)
+        bip_blocks_dir = self.output_dir.parent / 'bip_blocks'
+        self.bip_detector = BIPDetector(bip_blocks_dir)
         
         # Auto-sync git: check environment variable if not explicitly set
         if auto_sync_git is None:
@@ -1055,10 +1304,17 @@ class OPReturnScanner:
         
         return metadata
     
-    def scan_block(self, block_number, skip_if_scanned=True, send_immediate_notifications=False):
-        """Scan a single block for OP_RETURN transactions"""
-        # Check if already scanned
-        if skip_if_scanned and self.block_already_scanned(block_number):
+    def scan_block(self, block_number, skip_if_scanned=True, send_immediate_notifications=False, bip_only=False):
+        """Scan a single block for OP_RETURN transactions
+        
+        Args:
+            block_number: Block number to scan
+            skip_if_scanned: Skip if already scanned (only applies when not bip_only)
+            send_immediate_notifications: Send notifications immediately (only applies when not bip_only)
+            bip_only: If True, only detect BIP signaling, skip OP_RETURN scanning
+        """
+        # Check if already scanned (skip this check in bip_only mode)
+        if not bip_only and skip_if_scanned and self.block_already_scanned(block_number):
             logger.info(f"⏭️  Block {block_number} already scanned, skipping")
             return 0
         
@@ -1073,11 +1329,58 @@ class OPReturnScanner:
             # Extract mining pool from coinbase transaction (first tx)
             mined_by = None
             coinbase_text = None
+            coinbase_tx = None
             if len(block['tx']) > 0:
                 coinbase_tx = block['tx'][0]
                 mined_by, coinbase_text = self.extract_mining_pool(coinbase_tx)
                 if mined_by:
                     logger.info(f"⛏️  Block mined by: {mined_by}")
+            
+            # Check for BIP signaling (e.g., BIP-110)
+            # Get block header info (version, etc.)
+            block_header = {
+                'version': block.get('version'),
+                'time': block.get('time'),
+                'bits': block.get('bits'),
+                'nonce': block.get('nonce'),
+            }
+            
+            # Detect BIP-110 signaling
+            bip110_signal = self.bip_detector.detect_bip110(
+                coinbase_tx, 
+                block_header, 
+                block_number, 
+                block_time, 
+                mined_by
+            )
+            
+            if bip110_signal:
+                logger.info(f"🔔 BIP-110 signal detected in block {block_number} (mined by {mined_by})")
+                logger.info(f"   Detection methods: {', '.join(bip110_signal['detection_methods'])}")
+                if bip110_signal.get('coinbase_text'):
+                    logger.debug(f"   Coinbase text: {bip110_signal['coinbase_text'][:200]}")
+                self.bip_detector.save_bip_signal('bip-110', bip110_signal)
+                # Send notification about BIP signal
+                if self.notifier.any_enabled:
+                    self.notifier.notify_bip_signal(bip110_signal)
+            else:
+                # Debug: Log when we don't detect BIP-110 for known blocks
+                if block_number in [938903]:
+                    logger.warning(f"   ⚠️  Block {block_number} did not match BIP-110 patterns")
+                    if coinbase_tx and coinbase_tx.get('vin'):
+                        coinbase_input = coinbase_tx['vin'][0]
+                        if 'coinbase' in coinbase_input:
+                            coinbase_hex = coinbase_input['coinbase']
+                            try:
+                                coinbase_bytes = bytes.fromhex(coinbase_hex)
+                                coinbase_text = coinbase_bytes.decode('ascii', errors='ignore')
+                                logger.warning(f"   Coinbase text: {repr(coinbase_text[:500])}")
+                            except:
+                                logger.warning(f"   Coinbase hex: {coinbase_hex[:200]}")
+            
+            # If bip_only mode, skip OP_RETURN scanning
+            if bip_only:
+                return 0
             
             # Create scan record
             scan_record = None
@@ -1207,9 +1510,48 @@ class OPReturnScanner:
             
             # Extract mining pool from coinbase transaction (first tx)
             mined_by = None
+            coinbase_tx = None
             if len(block['tx']) > 0:
                 coinbase_tx = block['tx'][0]
                 mined_by, _ = self.extract_mining_pool(coinbase_tx)
+            
+            # Check for BIP signaling (e.g., BIP-110) even in RPC-only mode
+            block_header = {
+                'version': block.get('version'),
+                'time': block.get('time'),
+                'bits': block.get('bits'),
+                'nonce': block.get('nonce'),
+            }
+            bip110_signal = self.bip_detector.detect_bip110(
+                coinbase_tx, 
+                block_header, 
+                block_number, 
+                block_time, 
+                mined_by
+            )
+            if bip110_signal:
+                logger.info(f"🔔 BIP-110 signal detected in block {block_number} (mined by {mined_by})")
+                logger.info(f"   Detection methods: {', '.join(bip110_signal['detection_methods'])}")
+                if bip110_signal.get('coinbase_text'):
+                    logger.debug(f"   Coinbase text: {bip110_signal['coinbase_text'][:200]}")
+                self.bip_detector.save_bip_signal('bip-110', bip110_signal)
+                # Send notification about BIP signal
+                if self.notifier.any_enabled:
+                    self.notifier.notify_bip_signal(bip110_signal)
+            else:
+                # Debug: Log when we don't detect BIP-110 for known blocks
+                if block_number in [938903]:
+                    logger.warning(f"   ⚠️  Block {block_number} did not match BIP-110 patterns")
+                    if coinbase_tx and coinbase_tx.get('vin'):
+                        coinbase_input = coinbase_tx['vin'][0]
+                        if 'coinbase' in coinbase_input:
+                            coinbase_hex = coinbase_input['coinbase']
+                            try:
+                                coinbase_bytes = bytes.fromhex(coinbase_hex)
+                                coinbase_text = coinbase_bytes.decode('ascii', errors='ignore')
+                                logger.warning(f"   Coinbase text: {repr(coinbase_text[:500])}")
+                            except:
+                                logger.warning(f"   Coinbase hex: {coinbase_hex[:200]}")
             
             # Check each transaction
             for tx in block['tx']:
@@ -1299,8 +1641,12 @@ class OPReturnScanner:
             'op_returns_by_block': op_returns_by_block
         }
     
-    def scan_blocks(self, start_block, end_block=None, auto_continue=False, backwards=False, send_immediate_notifications=False):
-        """Scan a range of blocks"""
+    def scan_blocks(self, start_block, end_block=None, auto_continue=False, backwards=False, send_immediate_notifications=False, bip_only=False):
+        """Scan a range of blocks
+        
+        Args:
+            bip_only: If True, only detect BIP signaling, skip OP_RETURN scanning
+        """
         # Handle backwards mode (scan backwards in time from first scanned block)
         if backwards:
             first_scanned = self.get_first_scanned_block()
@@ -1337,9 +1683,13 @@ class OPReturnScanner:
                 logger.info(f"   Average per block: {stats['avg_per_block']:.2f}")
                 print()
         
-        logger.info(f"🔍 Scanning blocks {start_block} to {end_block}")
-        logger.info(f"   Looking for OP_RETURN data > 83 bytes")
-        logger.info(f"   Output directory: {self.output_dir.absolute()}")
+        if bip_only:
+            logger.info(f"🔍 Scanning blocks {start_block} to {end_block} for BIP signaling")
+            logger.info(f"   BIP-only mode: OP_RETURN scanning disabled")
+        else:
+            logger.info(f"🔍 Scanning blocks {start_block} to {end_block}")
+            logger.info(f"   Looking for OP_RETURN data > 83 bytes")
+            logger.info(f"   Output directory: {self.output_dir.absolute()}")
         print()
         
         total_found = 0
@@ -1351,7 +1701,7 @@ class OPReturnScanner:
                 progress = ((block_num - start_block) / total_blocks) * 100
                 logger.info(f"📈 Progress: {progress:.1f}% (Block {block_num}/{end_block})")
             
-            found = self.scan_block(block_num, send_immediate_notifications=send_immediate_notifications)
+            found = self.scan_block(block_num, send_immediate_notifications=send_immediate_notifications, bip_only=bip_only)
             total_found += found
             
             # If OP_RETURNs were found, get their details (for batch notification if not using immediate)
@@ -1385,7 +1735,10 @@ class OPReturnScanner:
         
         logger.info(f"\n✅ Scan complete!")
         logger.info(f"   Scanned {total_blocks} blocks")
-        logger.info(f"   Found {total_found} OP_RETURN transactions > 83 bytes")
+        if not bip_only:
+            logger.info(f"   Found {total_found} OP_RETURN transactions > 83 bytes")
+        else:
+            logger.info(f"   BIP detection complete - check bip_blocks/ directory for results")
         
         # Display found items summary
         if found_items:
@@ -1405,15 +1758,15 @@ class OPReturnScanner:
         
         logger.info(f"\n💾 Data saved to: {self.output_dir.absolute()}")
         
-        # Regenerate timeline_data.json if any OP_RETURNs were found
-        if total_found > 0:
+        # Regenerate timeline_data.json if any OP_RETURNs were found (skip in bip_only mode)
+        if not bip_only and total_found > 0:
             self.regenerate_timeline_data()
         
-        # Send batch notifications if OP_RETURNs were found (only if not using immediate notifications)
-        if total_found > 0 and found_items and not send_immediate_notifications:
+        # Send batch notifications if OP_RETURNs were found (only if not using immediate notifications, skip in bip_only)
+        if not bip_only and total_found > 0 and found_items and not send_immediate_notifications:
             self.notifier.notify_new_op_returns(found_items)
         
-        # Auto-sync git if enabled (check even if no new OP_RETURNs found)
+        # Auto-sync git if enabled (check even if no new OP_RETURNs found, or if BIP data was saved)
         if self.auto_sync_git:
             self.sync_git_changes()
         else:
@@ -2523,6 +2876,9 @@ Examples:
   
   RPC-only mode (check blocks without saving):
     python op_return_scanner.py 924617 925147 --rpc-only
+  
+  BIP-only mode (only detect BIP signaling, skip OP_RETURN scanning):
+    python op_return_scanner.py 924617 925147 --bip-only
         """
     )
     parser.add_argument('start_block', type=int, nargs='?', help='Starting block number')
@@ -2558,6 +2914,8 @@ Examples:
                        help='Sync OP_RETURN data from filesystem to database (optionally specify a block number, or sync all blocks)')
     parser.add_argument('--rpc-only', action='store_true',
                        help='RPC-only mode: Check blocks via RPC and report findings without database or filesystem operations')
+    parser.add_argument('--bip-only', action='store_true',
+                       help='BIP-only mode: Only detect BIP signaling, skip OP_RETURN scanning (faster for BIP detection)')
     
     args = parser.parse_args()
     
@@ -2646,7 +3004,8 @@ Examples:
         
         result = scanner.scan_blocks(args.start_block, args.end_block, 
                           auto_continue=args.auto_continue, 
-                          backwards=args.backwards)
+                          backwards=args.backwards,
+                          bip_only=args.bip_only)
         
         # Handle return value (may be tuple or int for backwards compatibility)
         if isinstance(result, tuple):

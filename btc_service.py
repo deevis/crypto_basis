@@ -471,4 +471,333 @@ class BTCService:
             
         except Exception as e:
             logger.error(f"Error scanning UTXOs: {e}")
-            return [], Decimal('0') 
+            return [], Decimal('0')
+    
+    # ========================================================================
+    # UTXO History Tracing Methods
+    # ========================================================================
+    
+    # Exchange detection thresholds
+    EXCHANGE_INPUT_THRESHOLD = 20   # Transactions with > 20 inputs likely from exchange
+    EXCHANGE_OUTPUT_THRESHOLD = 20  # Transactions with > 20 outputs likely from exchange (lowered from 50)
+    EXCHANGE_COMBINED_THRESHOLD = 25  # Or combined inputs + outputs > 25 (lowered from 30)
+    EXCHANGE_WITHDRAWAL_OUTPUT_MIN = 10  # Min outputs for withdrawal pattern detection
+    EXCHANGE_WITHDRAWAL_RATIO = 5  # Output/input ratio > 5 suggests exchange withdrawal
+    
+    def is_coinbase_transaction(self, tx_data):
+        """
+        Check if a transaction is a coinbase (mining reward) transaction.
+        Coinbase transactions have a single input with 'coinbase' field instead of 'txid'.
+        """
+        vin = tx_data.get('vin', [])
+        if len(vin) == 1 and 'coinbase' in vin[0]:
+            return True
+        return False
+    
+    def detect_exchange_indicators(self, tx_data):
+        """
+        Detect if a transaction looks like it came from an exchange.
+        Returns a dict with indicators and whether it's likely an exchange.
+        
+        Exchange-like patterns:
+        - Many inputs (consolidation or payout batching)
+        - Many outputs (batch payouts)
+        - Specific known exchange address patterns
+        """
+        indicators = {}
+        is_exchange_like = False
+        
+        vin = tx_data.get('vin', [])
+        vout = tx_data.get('vout', [])
+        
+        input_count = len(vin)
+        output_count = len(vout)
+        
+        indicators['input_count'] = input_count
+        indicators['output_count'] = output_count
+        
+        # Check for high input count (exchange consolidation or batched sends)
+        if input_count > self.EXCHANGE_INPUT_THRESHOLD:
+            indicators['high_input_count'] = True
+            is_exchange_like = True
+        
+        # Check for high output count (batch payouts)
+        if output_count > self.EXCHANGE_OUTPUT_THRESHOLD:
+            indicators['high_output_count'] = True
+            is_exchange_like = True
+        
+        # Check combined threshold
+        if input_count + output_count > self.EXCHANGE_COMBINED_THRESHOLD:
+            indicators['high_combined_count'] = True
+            is_exchange_like = True
+        
+        # Check for exchange WITHDRAWAL pattern: few inputs, many outputs
+        # This is a classic pattern: exchange consolidates to hot wallet (1-3 inputs)
+        # then batch pays out to many users (many outputs)
+        if input_count <= 3 and output_count >= self.EXCHANGE_WITHDRAWAL_OUTPUT_MIN:
+            # Calculate output/input ratio
+            ratio = output_count / max(input_count, 1)
+            if ratio >= self.EXCHANGE_WITHDRAWAL_RATIO:
+                indicators['exchange_withdrawal_pattern'] = True
+                indicators['output_input_ratio'] = ratio
+                is_exchange_like = True
+                logger.info(f"Detected exchange withdrawal pattern: {input_count} inputs, {output_count} outputs (ratio: {ratio:.1f})")
+        
+        # Calculate total input and output values
+        total_output = sum(v.get('value', 0) for v in vout)
+        indicators['total_output_btc'] = total_output
+        
+        # Very large transactions are often exchange-related
+        if total_output > 100:  # > 100 BTC
+            indicators['large_value'] = True
+            # Don't set is_exchange_like just for this, but note it
+        
+        return is_exchange_like, indicators
+    
+    def get_output_address(self, vout_data):
+        """Extract address from a transaction output"""
+        script_pub_key = vout_data.get('scriptPubKey', {})
+        
+        # New format (single address)
+        if 'address' in script_pub_key:
+            return script_pub_key['address']
+        # Old format (multiple addresses)
+        elif 'addresses' in script_pub_key:
+            addresses = script_pub_key['addresses']
+            return addresses[0] if addresses else None
+        
+        return None
+    
+    def trace_utxo_backwards(self, txid, vout, max_hops=10, max_transactions=100,
+                              current_hop=0, visited=None, transaction_count=None):
+        """
+        Trace a UTXO backwards through the blockchain to find its origin.
+        
+        Args:
+            txid: Transaction ID containing the output
+            vout: Output index in the transaction
+            max_hops: Maximum depth to trace back per branch
+            max_transactions: Maximum TOTAL transactions to explore (prevents exponential explosion)
+            current_hop: Current hop number (for recursion)
+            visited: Set of already visited txid:vout pairs (shared across all branches)
+            transaction_count: Mutable list [count] to track total transactions across recursive calls
+        
+        Returns:
+            List of trace entries, each containing:
+            - hop_number: Which hop this is
+            - txid: Transaction ID
+            - vout: Output index
+            - amount: Amount in BTC
+            - block_height: Block number
+            - block_time: Block timestamp
+            - source_address: Address that received this output
+            - input_count: Number of inputs in transaction
+            - output_count: Number of outputs in transaction
+            - is_coinbase: Whether this is a coinbase transaction
+            - is_exchange_like: Whether this looks like an exchange transaction
+            - exchange_indicators: Dict of exchange detection indicators
+            - termination_reason: Why tracing stopped (if applicable)
+        """
+        if visited is None:
+            visited = set()
+        if transaction_count is None:
+            transaction_count = [0]  # Mutable container to share count across recursive calls
+        
+        # Check global transaction limit FIRST
+        if transaction_count[0] >= max_transactions:
+            logger.warning(f"Reached max transaction limit ({max_transactions}), stopping trace")
+            return [{
+                'hop_number': current_hop,
+                'txid': txid,
+                'vout': vout,
+                'amount': Decimal('0'),
+                'termination_reason': 'MAX_TRANSACTIONS',
+                'error': f'Reached limit of {max_transactions} transactions'
+            }]
+        
+        # Avoid infinite loops - shared visited set across all branches
+        utxo_key = f"{txid}:{vout}"
+        if utxo_key in visited:
+            logger.debug(f"Already visited {utxo_key}, skipping")
+            return []
+        visited.add(utxo_key)
+        
+        # Increment global transaction count
+        transaction_count[0] += 1
+        
+        if transaction_count[0] % 10 == 0:
+            logger.info(f"Explored {transaction_count[0]} transactions so far...")
+        
+        logger.debug(f"Tracing UTXO {utxo_key} at hop {current_hop}")
+        
+        try:
+            # Get the transaction
+            tx_data = self._call_rpc("getrawtransaction", [txid, True])
+            
+            if not tx_data:
+                logger.error(f"Could not get transaction {txid}")
+                return [{
+                    'hop_number': current_hop,
+                    'txid': txid,
+                    'vout': vout,
+                    'amount': Decimal('0'),
+                    'termination_reason': 'ERROR',
+                    'error': 'Transaction not found'
+                }]
+            
+            # Get block info
+            block_height = None
+            block_time = None
+            if 'blockhash' in tx_data:
+                try:
+                    block_info = self._call_rpc("getblock", [tx_data['blockhash']])
+                    block_height = block_info.get('height')
+                    block_time = datetime.fromtimestamp(block_info.get('time', 0))
+                except Exception as e:
+                    logger.warning(f"Could not get block info: {e}")
+            
+            # Get the specific output
+            vouts = tx_data.get('vout', [])
+            if vout >= len(vouts):
+                logger.error(f"Output index {vout} out of range for tx {txid}")
+                return [{
+                    'hop_number': current_hop,
+                    'txid': txid,
+                    'vout': vout,
+                    'amount': Decimal('0'),
+                    'termination_reason': 'ERROR',
+                    'error': f'Output index {vout} out of range'
+                }]
+            
+            output_data = vouts[vout]
+            amount = Decimal(str(output_data.get('value', 0)))
+            source_address = self.get_output_address(output_data)
+            
+            # Check if coinbase
+            is_coinbase = self.is_coinbase_transaction(tx_data)
+            
+            # Check for exchange-like patterns
+            is_exchange_like, exchange_indicators = self.detect_exchange_indicators(tx_data)
+            
+            input_count = len(tx_data.get('vin', []))
+            output_count = len(tx_data.get('vout', []))
+            
+            # Build current hop entry
+            entry = {
+                'hop_number': current_hop,
+                'txid': txid,
+                'vout': vout,
+                'amount': amount,
+                'block_height': block_height,
+                'block_time': block_time,
+                'source_address': source_address,
+                'input_count': input_count,
+                'output_count': output_count,
+                'is_coinbase': is_coinbase,
+                'is_exchange_like': is_exchange_like,
+                'exchange_indicators': exchange_indicators,
+                'termination_reason': None
+            }
+            
+            # Check termination conditions
+            if is_coinbase:
+                entry['termination_reason'] = 'COINBASE'
+                logger.info(f"Reached coinbase transaction at hop {current_hop}: {txid}")
+                return [entry]
+            
+            if is_exchange_like:
+                entry['termination_reason'] = 'EXCHANGE'
+                logger.info(f"Reached exchange-like transaction at hop {current_hop}: {txid}")
+                logger.info(f"  Indicators: {exchange_indicators}")
+                return [entry]
+            
+            if current_hop >= max_hops:
+                entry['termination_reason'] = 'MAX_HOPS'
+                logger.info(f"Reached max hops ({max_hops}) at {txid}")
+                return [entry]
+            
+            # Continue tracing - follow each input
+            results = [entry]
+            
+            vin = tx_data.get('vin', [])
+            for vin_index, inp in enumerate(vin):
+                # Check if we've hit the transaction limit before processing more inputs
+                if transaction_count[0] >= max_transactions:
+                    logger.info(f"Stopping input exploration - reached transaction limit")
+                    break
+                
+                # Get the previous transaction output that this input spends
+                prev_txid = inp.get('txid')
+                prev_vout = inp.get('vout')
+                
+                if prev_txid is None or prev_vout is None:
+                    # This shouldn't happen for non-coinbase, but handle it
+                    logger.warning(f"Input missing txid/vout: {inp}")
+                    continue
+                
+                # Recursively trace - SHARE visited set and transaction_count across all branches
+                sub_results = self.trace_utxo_backwards(
+                    prev_txid, prev_vout, 
+                    max_hops=max_hops,
+                    max_transactions=max_transactions,
+                    current_hop=current_hop + 1,
+                    visited=visited,  # Shared across all branches
+                    transaction_count=transaction_count  # Shared counter
+                )
+                
+                # Add flow information to link this transaction to the previous one
+                for sub_entry in sub_results:
+                    if sub_entry.get('hop_number') == current_hop + 1:
+                        # This is the immediate child - add flow info
+                        sub_entry['spent_by_txid'] = txid
+                        sub_entry['spent_by_vin'] = vin_index
+                
+                results.extend(sub_results)
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error tracing UTXO {txid}:{vout}: {e}")
+            return [{
+                'hop_number': current_hop,
+                'txid': txid,
+                'vout': vout,
+                'amount': Decimal('0'),
+                'termination_reason': 'ERROR',
+                'error': str(e)
+            }]
+    
+    def trace_address_utxos(self, address, max_hops=10, max_transactions=100):
+        """
+        Trace all UTXOs for an address backwards to their origins.
+        
+        Args:
+            address: Bitcoin address to trace
+            max_hops: Maximum depth per trace branch
+            max_transactions: Maximum total transactions to explore per UTXO
+        
+        Returns:
+            Dict mapping utxo_key (txid:vout) to list of trace entries
+        """
+        logger.info(f"Tracing UTXOs for address: {address}")
+        
+        # Get current UTXOs for the address
+        utxos, total = self.check_address_utxos(address)
+        
+        if not utxos:
+            logger.info(f"No UTXOs found for address {address}")
+            return {}
+        
+        logger.info(f"Found {len(utxos)} UTXOs totaling {total} BTC")
+        
+        results = {}
+        for utxo in utxos:
+            txid = utxo.get('txid')
+            vout = utxo.get('vout')
+            utxo_key = f"{txid}:{vout}"
+            
+            logger.info(f"Tracing UTXO {utxo_key}...")
+            trace = self.trace_utxo_backwards(txid, vout, max_hops=max_hops, max_transactions=max_transactions)
+            results[utxo_key] = trace
+        
+        return results 
